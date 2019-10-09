@@ -1014,13 +1014,22 @@ var getJibProfilesDependencies = function (input, common) {
             ext: "tar.gz",
             revision: "1.0118+1.0"
         },
-
+/*
         jtreg: {
             server: "javare",
             revision: "4.2",
             build_number: "b14",
             checksum_file: "MD5_VALUES",
             file: "jtreg_bin-4.2.zip",
+            environment_name: "JT_HOME",
+            environment_path: input.get("jtreg", "install_path") + "/jtreg/bin"
+        },
+*/
+
+        jtreg: {
+            organization: common.organization,
+            ext: "zip",
+            revision: "4.2-fiber-1.0",
             environment_name: "JT_HOME",
             environment_path: input.get("jtreg", "install_path") + "/jtreg/bin"
         },
