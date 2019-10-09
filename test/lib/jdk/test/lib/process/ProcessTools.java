@@ -28,6 +28,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.charset.Charset;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -292,7 +293,40 @@ public final class ProcessTools {
             Collections.addAll(args, Utils.getTestJavaOpts());
         }
 
-        Collections.addAll(args, command);
+        if(System.getProperty("main.wrapper") != null) {
+
+            boolean skipNext = false;
+            boolean added = false;
+            for (String cmd : command) {
+                if (added) {
+                    args.add(cmd);
+                    continue;
+                }
+
+                if (skipNext) {
+                    skipNext = false;
+                    args.add(cmd);
+                    continue;
+                }
+                if (cmd.startsWith("-cp")) {
+                    skipNext = true;
+                args.add(cmd);
+                continue;
+                }
+
+                if (cmd.startsWith("-")) {
+                    args.add(cmd);
+                    continue;
+                }
+                args.add("jdk.test.lib.process.ProcessTools");
+                added = true;
+                // Should be main
+                System.out.println("Wrapped TOFIND: " + cmd);
+                args.add(cmd);
+            }
+        } else {
+            Collections.addAll(args, command);
+        }
 
         // Reporting
         StringBuilder cmdLine = new StringBuilder();
@@ -579,5 +613,25 @@ public final class ProcessTools {
             } catch (ExecutionException e) {
             }
         }
+    }
+
+    // ProcessTools as a wrapper
+    public static void main(String[] args) throws Exception {
+        String className = args[0];
+        String[] classArgs = new String[args.length - 1];
+        System.arraycopy(args, 1, classArgs, 0, args.length - 1);
+        Class c = Class.forName(className);
+        Method mainMethod = c.getMethod("main", new Class[] { String[].class });
+
+
+        //        mainMethod.invoke(null, new Object[] { classArgs });
+
+        Fiber fiber = FiberScope.background().schedule(() -> {
+                //                System.out.println("Running test in fiber: " + className);
+                //                new Exception().printStackTrace(System.out);
+                mainMethod.invoke(null, new Object[] { classArgs });
+                return null;
+            });
+        fiber.join();
     }
 }

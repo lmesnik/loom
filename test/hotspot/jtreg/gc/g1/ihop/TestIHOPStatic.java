@@ -157,7 +157,7 @@ public class TestIHOPStatic {
         IhopUtils.checkIhopLogValues(out);
     }
 
-    static class AppIHOP {
+    public static class AppIHOP {
 
         /**
          * Simple class which fills part of memory and initiates GC.
