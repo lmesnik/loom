@@ -219,3 +219,20 @@ vmTestbase/nsk/monitoring/ThreadMXBean/ThreadInfo/Multi/Multi004/TestDescription
 vmTestbase/nsk/monitoring/ThreadMXBean/ThreadInfo/Multi/Multi005/TestDescription.java 8231032 generic-all
 
 #############################################################################
+
+#### Temporary excluded, failed with fiber but because of wrapper
+vmTestbase/nsk/jdi/ClassPrepareEvent/referenceType/refType001/TestDescription.java 99999998 generic-all
+vmTestbase/nsk/jdi/ClassPrepareEvent/thread/thread001/TestDescription.java 99999998 generic-all
+vmTestbase/nsk/jdi/ClassUnloadEvent/className/classname001/TestDescription.java 99999998 generic-all
+vmTestbase/nsk/jdi/ClassUnloadEvent/classSignature/signature001/TestDescription.java 99999998 generic-all
+vmTestbase/nsk/jdi/ExceptionEvent/catchLocation/location001/TestDescription.java 99999998 generic-all
+vmTestbase/nsk/jdi/ExceptionEvent/catchLocation/location002/TestDescription.java 99999998 generic-all
+vmTestbase/nsk/jdi/ExceptionEvent/exception/exception001/TestDescription.java 99999998 generic-all
+vmTestbase/nsk/jdi/ModificationWatchpointEvent/valueToBe/valuetobe001/TestDescription.java 99999998 generic-all
+vmTestbase/nsk/jdi/ModificationWatchpointEvent/valueToBe/valuetobe002/TestDescription.java 99999998 generic-all
+vmTestbase/nsk/jdi/ThreadDeathEvent/thread/thread001/TestDescription.java 99999998 generic-all
+vmTestbase/nsk/jdi/ThreadStartEvent/thread/thread001/TestDescription.java 99999998 generic-all
+vmTestbase/nsk/jdi/VMStartEvent/thread/thread001/TestDescription.java 99999998 generic-all
+vmTestbase/nsk/jdi/WatchpointEvent/field/field001/TestDescription.java 99999998 generic-all
+vmTestbase/nsk/jdi/WatchpointEvent/object/object001/TestDescription.java 99999998 generic-all
+vmTestbase/nsk/jdi/WatchpointEvent/valueCurrent/valuecur001/TestDescription.java 99999998 generic-all
