@@ -1590,6 +1590,7 @@ WB_ENTRY(jint, WB_GetCompilationActivityMode(JNIEnv* env, jobject o))
 WB_END
 
 WB_ENTRY(jobjectArray, WB_GetCodeBlob(JNIEnv* env, jobject o, jlong addr))
+  ResourceMark rm(THREAD);
   if (addr == 0) {
     THROW_MSG_NULL(vmSymbols::java_lang_NullPointerException(),
       "WB_GetCodeBlob: addr is null");
