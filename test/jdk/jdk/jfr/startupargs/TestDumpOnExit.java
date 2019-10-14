@@ -105,7 +105,7 @@ public class TestDumpOnExit {
     }
 
     @SuppressWarnings("unused")
-    private static class TestMain {
+    public static class TestMain {
         public static void main(String[] args) throws Exception {
             System.out.println("Hello from test main");
         }

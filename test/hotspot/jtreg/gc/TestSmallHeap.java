@@ -120,7 +120,7 @@ public class TestSmallHeap {
     }
 }
 
-class VerifyHeapSize {
+public class VerifyHeapSize {
     public static final String actualMsg = "Actual heap size: ";
 
     public static void main(String args[]) {

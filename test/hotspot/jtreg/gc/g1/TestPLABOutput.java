@@ -82,7 +82,7 @@ public class TestPLABOutput {
         runTest();
     }
 
-    static class GCTest {
+    public static class GCTest {
         private static final WhiteBox WB = WhiteBox.getWhiteBox();
 
         public static Object holder;
@@ -94,4 +94,3 @@ public class TestPLABOutput {
         }
     }
 }
-

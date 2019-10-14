@@ -55,7 +55,7 @@ public class CleanProtectionDomain {
     output.shouldHaveExitValue(0);
   }
 
-  static class Test {
+  public static class Test {
     public static void test() throws Exception {
       TestClassLoader classloader = new TestClassLoader();
       ProtectionDomain pd = new ProtectionDomain(null, null);

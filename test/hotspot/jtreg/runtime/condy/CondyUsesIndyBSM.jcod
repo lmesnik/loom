@@ -23,12 +23,12 @@
 
 /*
  * This test contains a CONSTANT_Dynamic_info structure whose bootstrap_method_attr_index
- * points to a BSM for an invokedynamic.  Both the condy & indy point at element 0 in the 
- * bootstrap methods array.  BootstrapMethodError expected. 
+ * points to a BSM for an invokedynamic.  Both the condy & indy point at element 0 in the
+ * bootstrap methods array.  BootstrapMethodError expected.
  */
 
 /*
-class CondyUsesIndyBSM {
+public class CondyUsesIndyBSM {
     CondyUsesIndyBSM() { }
     public static Object Condybsm(java.lang.invoke.MethodHandles$Lookup, java.lang.String, java.lang.Class) {
         System.out.println("In Condybsm");
@@ -71,97 +71,97 @@ class CondyUsesIndyBSM {
   55; // version
   [] { // Constant Pool
     ; // first element is empty
-    Utf8 "java/lang/Object"; // #1    
-    class #1; // #2    
-    Utf8 "<init>"; // #3    
-    Utf8 "()V"; // #4    
-    NameAndType #3 #4; // #5    
-    Method #2 #5; // #6    
-    Utf8 "Code"; // #7    
-    Utf8 "java/lang/System"; // #8    
-    class #8; // #9    
-    Utf8 "out"; // #10    
-    Utf8 "Ljava/io/PrintStream;"; // #11    
-    NameAndType #10 #11; // #12    
-    Field #9 #12; // #13    
-    Utf8 "In Condybsm"; // #14    
-    String #14; // #15    
-    Utf8 "java/io/PrintStream"; // #16    
-    class #16; // #17    
-    Utf8 "println"; // #18    
-    Utf8 "(Ljava/lang/String;)V"; // #19    
-    NameAndType #18 #19; // #20    
-    Method #17 #20; // #21    
-    Utf8 "0"; // #22    
-    String #22; // #23    
-    Utf8 "Condybsm"; // #24    
-    Utf8 "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/Class;)Ljava/lang/Object;"; // #25    
-    Utf8 "In Indybsm target CallSite method foo"; // #26    
-    String #26; // #27    
-    Utf8 "foo"; // #28    
-    Utf8 "()I"; // #29    
-    Utf8 "java/lang/invoke/MethodHandles"; // #30    
-    class #30; // #31    
-    Utf8 "lookup"; // #32    
-    Utf8 "()Ljava/lang/invoke/MethodHandles$Lookup;"; // #33    
-    NameAndType #32 #33; // #34    
-    Method #31 #34; // #35    
-    Utf8 "CondyUsesIndyBSM"; // #36    
-    class #36; // #37    
-    String #28; // #38    
-    Utf8 "java/lang/Integer"; // #39    
-    class #39; // #40    
-    Utf8 "TYPE"; // #41    
-    Utf8 "Ljava/lang/Class;"; // #42    
-    NameAndType #41 #42; // #43    
-    Field #40 #43; // #44    
-    Utf8 "java/lang/invoke/MethodType"; // #45    
-    class #45; // #46    
-    Utf8 "methodType"; // #47    
-    Utf8 "(Ljava/lang/Class;)Ljava/lang/invoke/MethodType;"; // #48    
-    NameAndType #47 #48; // #49    
-    Method #46 #49; // #50    
-    Utf8 "java/lang/invoke/MethodHandles$Lookup"; // #51    
-    class #51; // #52    
-    Utf8 "findStatic"; // #53    
-    Utf8 "(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/MethodHandle;"; // #54    
-    NameAndType #53 #54; // #55    
-    Method #52 #55; // #56    
-    Utf8 "MH_foo"; // #57    
-    Utf8 "()Ljava/lang/invoke/MethodHandle;"; // #58    
-    Utf8 "java/lang/invoke/ConstantCallSite"; // #59    
-    class #59; // #60    
-    NameAndType #57 #58; // #61    
-    Method #37 #61; // #62    
-    Utf8 "(Ljava/lang/invoke/MethodHandle;)V"; // #63    
-    NameAndType #3 #63; // #64    
-    Method #60 #64; // #65    
-    Utf8 "Indybsm"; // #66    
-    Utf8 "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;"; // #67    
-    NameAndType #66 #67; // #68    
-    Method #37 #68; // #69    
-    MethodHandle 6b #69; // #70    
-    NameAndType #28 #29; // #71    
-    InvokeDynamic 0s #71; // #72    
-    NameAndType #24 #25; // #73    
-    Method #37 #73; // #74    
-    MethodHandle 6b #74; // #75    
-    Utf8 "name"; // #76    
-    Utf8 "Ljava/lang/Object;"; // #77    
-    NameAndType #76 #77; // #78    
-    Dynamic 0s #78; // #79    
-    Utf8 "m"; // #80    
-    Utf8 "()Ljava/lang/Object;"; // #81    
-    NameAndType #80 #81; // #82    
-    Method #37 #82; // #83    
-    Utf8 "main"; // #84    
-    Utf8 "([Ljava/lang/String;)V"; // #85    
-    Utf8 "BootstrapMethods"; // #86    
-    Utf8 "CondyUsesIndyBSM"; // #87    
-    class #87; // #88    
+    Utf8 "java/lang/Object"; // #1
+    class #1; // #2
+    Utf8 "<init>"; // #3
+    Utf8 "()V"; // #4
+    NameAndType #3 #4; // #5
+    Method #2 #5; // #6
+    Utf8 "Code"; // #7
+    Utf8 "java/lang/System"; // #8
+    class #8; // #9
+    Utf8 "out"; // #10
+    Utf8 "Ljava/io/PrintStream;"; // #11
+    NameAndType #10 #11; // #12
+    Field #9 #12; // #13
+    Utf8 "In Condybsm"; // #14
+    String #14; // #15
+    Utf8 "java/io/PrintStream"; // #16
+    class #16; // #17
+    Utf8 "println"; // #18
+    Utf8 "(Ljava/lang/String;)V"; // #19
+    NameAndType #18 #19; // #20
+    Method #17 #20; // #21
+    Utf8 "0"; // #22
+    String #22; // #23
+    Utf8 "Condybsm"; // #24
+    Utf8 "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/Class;)Ljava/lang/Object;"; // #25
+    Utf8 "In Indybsm target CallSite method foo"; // #26
+    String #26; // #27
+    Utf8 "foo"; // #28
+    Utf8 "()I"; // #29
+    Utf8 "java/lang/invoke/MethodHandles"; // #30
+    class #30; // #31
+    Utf8 "lookup"; // #32
+    Utf8 "()Ljava/lang/invoke/MethodHandles$Lookup;"; // #33
+    NameAndType #32 #33; // #34
+    Method #31 #34; // #35
+    Utf8 "CondyUsesIndyBSM"; // #36
+    class #36; // #37
+    String #28; // #38
+    Utf8 "java/lang/Integer"; // #39
+    class #39; // #40
+    Utf8 "TYPE"; // #41
+    Utf8 "Ljava/lang/Class;"; // #42
+    NameAndType #41 #42; // #43
+    Field #40 #43; // #44
+    Utf8 "java/lang/invoke/MethodType"; // #45
+    class #45; // #46
+    Utf8 "methodType"; // #47
+    Utf8 "(Ljava/lang/Class;)Ljava/lang/invoke/MethodType;"; // #48
+    NameAndType #47 #48; // #49
+    Method #46 #49; // #50
+    Utf8 "java/lang/invoke/MethodHandles$Lookup"; // #51
+    class #51; // #52
+    Utf8 "findStatic"; // #53
+    Utf8 "(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/MethodHandle;"; // #54
+    NameAndType #53 #54; // #55
+    Method #52 #55; // #56
+    Utf8 "MH_foo"; // #57
+    Utf8 "()Ljava/lang/invoke/MethodHandle;"; // #58
+    Utf8 "java/lang/invoke/ConstantCallSite"; // #59
+    class #59; // #60
+    NameAndType #57 #58; // #61
+    Method #37 #61; // #62
+    Utf8 "(Ljava/lang/invoke/MethodHandle;)V"; // #63
+    NameAndType #3 #63; // #64
+    Method #60 #64; // #65
+    Utf8 "Indybsm"; // #66
+    Utf8 "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;"; // #67
+    NameAndType #66 #67; // #68
+    Method #37 #68; // #69
+    MethodHandle 6b #69; // #70
+    NameAndType #28 #29; // #71
+    InvokeDynamic 0s #71; // #72
+    NameAndType #24 #25; // #73
+    Method #37 #73; // #74
+    MethodHandle 6b #74; // #75
+    Utf8 "name"; // #76
+    Utf8 "Ljava/lang/Object;"; // #77
+    NameAndType #76 #77; // #78
+    Dynamic 0s #78; // #79
+    Utf8 "m"; // #80
+    Utf8 "()Ljava/lang/Object;"; // #81
+    NameAndType #80 #81; // #82
+    Method #37 #82; // #83
+    Utf8 "main"; // #84
+    Utf8 "([Ljava/lang/String;)V"; // #85
+    Utf8 "BootstrapMethods"; // #86
+    Utf8 "CondyUsesIndyBSM"; // #87
+    class #87; // #88
   } // Constant Pool
 
-  0x0000; // access
+  0x0001; // access
   #88;// this_cpx
   #2;// super_cpx
 

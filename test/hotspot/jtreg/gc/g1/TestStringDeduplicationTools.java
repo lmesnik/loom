@@ -205,7 +205,7 @@ class TestStringDeduplicationTools {
         return output;
     }
 
-    private static class DeduplicationTest {
+    public static class DeduplicationTest {
         public static void main(String[] args) {
             System.out.println("Begin: DeduplicationTest");
 
@@ -240,7 +240,7 @@ class TestStringDeduplicationTools {
         }
     }
 
-    private static class InternedTest {
+    public static class InternedTest {
         public static void main(String[] args) {
             // This test verifies that interned strings are always
             // deduplicated when being interned, and never after

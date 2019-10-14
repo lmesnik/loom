@@ -63,7 +63,7 @@ public class TestMetaspaceCMSCancel {
         output.shouldHaveExitValue(0);
     }
 
-    static class MetaspaceGCTest {
+    public static class MetaspaceGCTest {
         public static void main(String [] args) {
             WhiteBox wb = WhiteBox.getWhiteBox();
             System.gc();

@@ -21,46 +21,13 @@
  * questions.
  */
 
-package gc.parallel;
+package gc.arguments;
 
-/**
- * @test AdaptiveGCBoundary
- * @key gc regression
- * @requires vm.gc.Parallel
- * @summary UseAdaptiveGCBoundary is broken
- * @bug 8014546
- * @library /test/lib
- * @modules java.base/jdk.internal.misc
- *          java.management
- * @run main/othervm gc.parallel.AdaptiveGCBoundary
- * @author jon.masamitsu@oracle.com
- */
+import sun.hotspot.WhiteBox;
 
-import jdk.test.lib.process.ProcessTools;
-import jdk.test.lib.process.OutputAnalyzer;
-
-public class AdaptiveGCBoundary {
-  public static void main(String args[]) throws Exception {
-
-    ProcessBuilder pb = ProcessTools.createJavaProcessBuilder(
-      "-showversion",
-      "-XX:+UseParallelGC",
-      "-XX:+UseAdaptiveGCBoundary",
-      "-XX:+PrintCommandLineFlags",
-      SystemGCCaller.class.getName()
-      );
-
-    OutputAnalyzer output = new OutputAnalyzer(pb.start());
-
-    output.shouldContain("+UseAdaptiveGCBoundary");
-
-    output.shouldNotContain("error");
-
-    output.shouldHaveExitValue(0);
-  }
-  public static class SystemGCCaller {
-    public static void main(String [] args) {
-      System.gc();
-    }
+public class DetermineMaxHeapForCompressedOops {
+  public static void main(String[] args) throws Exception {
+    WhiteBox wb = WhiteBox.getWhiteBox();
+    System.out.print(wb.getCompressedOopsMaxHeapSize());
   }
 }

@@ -37,14 +37,7 @@ import jdk.test.lib.process.OutputAnalyzer;
 import java.lang.management.ManagementFactory;
 import sun.hotspot.WhiteBox;
 
-class DetermineMaxHeapForCompressedOops {
-  public static void main(String[] args) throws Exception {
-    WhiteBox wb = WhiteBox.getWhiteBox();
-    System.out.print(wb.getCompressedOopsMaxHeapSize());
-  }
-}
-
-class TestUseCompressedOopsErgoTools {
+public class TestUseCompressedOopsErgoTools {
 
   private static long getCompressedClassSpaceSize() {
     HotSpotDiagnosticMXBean diagnostic =

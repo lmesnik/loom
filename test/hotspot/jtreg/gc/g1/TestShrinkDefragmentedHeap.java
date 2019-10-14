@@ -78,7 +78,7 @@ public class TestShrinkDefragmentedHeap {
         output.shouldHaveExitValue(0);
     }
 
-    static class GCTest {
+    public static class GCTest {
 
         private static final String MIN_FREE_RATIO_FLAG_NAME = "MinHeapFreeRatio";
         private static final String MAX_FREE_RATIO_FLAG_NAME = "MaxHeapFreeRatio";
@@ -174,7 +174,7 @@ public class TestShrinkDefragmentedHeap {
     /**
      * Prints memory usage to standard output
      */
-    static class MemoryUsagePrinter {
+    public static class MemoryUsagePrinter {
 
         public static final NumberFormat NF = Helpers.numberFormatter();
 

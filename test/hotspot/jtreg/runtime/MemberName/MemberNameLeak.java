@@ -54,7 +54,7 @@ public class MemberNameLeak {
     private static int methodCount = 2000;
     public static ArrayList<MethodHandle> keepAlive;
 
-    static class Leak {
+    public static class Leak {
       public void callMe() {
       }
 

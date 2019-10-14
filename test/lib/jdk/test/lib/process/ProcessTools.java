@@ -1,3 +1,4 @@
+
 /*
  * Copyright (c) 2013, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -293,8 +294,16 @@ public final class ProcessTools {
             Collections.addAll(args, Utils.getTestJavaOpts());
         }
 
-        if(System.getProperty("main.wrapper") != null) {
+        boolean noModule = true;
+        for (String cmd: command) {
+            if (cmd.equals("-m")) {
+                noModule = false;
+            }
+        }
 
+        String[] doubleWordArgs = {"-cp", "-classpath", "--add-opens", "--class-path", "--upgrade-module-path", "--add-modules", "-d", "--add-exports", "--patch-module", "--module-path"};
+
+        if(noModule && System.getProperty("main.wrapper") != null) {
             boolean skipNext = false;
             boolean added = false;
             for (String cmd : command) {
@@ -308,17 +317,37 @@ public final class ProcessTools {
                     args.add(cmd);
                     continue;
                 }
+                for (String dWArg : doubleWordArgs) {
+                    if (cmd.equals(dWArg)) {
+                        skipNext = true;
+                        args.add(cmd);
+                        continue;
+                    }
+                }
+                if (skipNext) {
+                    continue;
+                }
                 if (cmd.startsWith("-cp")) {
                     skipNext = true;
-                args.add(cmd);
-                continue;
+                    args.add(cmd);
+                    continue;
                 }
-
+                if (cmd.startsWith("--add-exports")) {
+                    skipNext = true;
+                    args.add(cmd);
+                    continue;
+                }
+                if (cmd.startsWith("--patch-module")) {
+                    skipNext = true;
+                    args.add(cmd);
+                    continue;
+                }
                 if (cmd.startsWith("-")) {
                     args.add(cmd);
                     continue;
                 }
                 args.add("jdk.test.lib.process.ProcessTools");
+                args.add(System.getProperty("main.wrapper"));
                 added = true;
                 // Should be main
                 System.out.println("Wrapped TOFIND: " + cmd);
@@ -615,22 +644,65 @@ public final class ProcessTools {
     }
 
     // ProcessTools as a wrapper
-    public static void main(String[] args) throws Exception {
-        String className = args[0];
+    public static void main(String[] args) throws Throwable {
+        String wrapper = args[0];
+        String className = args[1];
         String[] classArgs = new String[args.length - 1];
-        System.arraycopy(args, 1, classArgs, 0, args.length - 1);
+        System.arraycopy(args, 2, classArgs, 0, args.length - 2);
         Class c = Class.forName(className);
         Method mainMethod = c.getMethod("main", new Class[] { String[].class });
+        //        System.out.println("PT: Running test with wrapper: " + wrapper);
 
-
-        //        mainMethod.invoke(null, new Object[] { classArgs });
-
-        Fiber fiber = FiberScope.background().schedule(() -> {
-                //                System.out.println("Running test in fiber: " + className);
-                //                new Exception().printStackTrace(System.out);
+        if (wrapper.equals("Fiber")) {
+            Fiber fiber = FiberScope.background().schedule(() -> {
+                    //                    System.out.println("Running test in fiber: " + className);
+                    //new Exception().printStackTrace(System.out);
                 mainMethod.invoke(null, new Object[] { classArgs });
                 return null;
             });
-        fiber.join();
+            Object result = fiber.join();
+            if (result != null && result instanceof Throwable) {
+                throw new RuntimeException((Throwable) result);
+            }
+        } else if (wrapper.equals("Thread")) {
+            MainThreadGroup tg = new MainThreadGroup();
+            Thread t = new Thread(tg, () -> {
+                    try {
+                    //    System.out.println("Running test in thread: " + className);
+                    //new Exception().printstreamStackTrace(System.out);
+
+                        mainMethod.invoke(null, new Object[] { classArgs });
+                    } catch (Throwable error) {
+                        tg.uncaughtThrowable = error;
+                    }
+                });
+            t.start();
+            t.join();
+            if (tg.uncaughtThrowable != null) {
+                throw new RuntimeException(tg.uncaughtThrowable);
+            }
+        } else {
+            //System.out.println("Running test in main: " + className);
+            //new Exception().printStackTrace(System.out);
+
+            mainMethod.invoke(null, new Object[] { classArgs });
+        }
+    }
+
+    static class MainThreadGroup extends ThreadGroup
+    {
+        MainThreadGroup() {
+            super("MainThreadGroup");
+        }
+
+        public void uncaughtException(Thread t, Throwable e) {
+            if (e instanceof ThreadDeath)
+                return;
+            e.printStackTrace(System.err);
+            uncaughtThrowable = e;
+        }
+
+        Throwable uncaughtThrowable = null;
+
     }
 }

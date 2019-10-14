@@ -63,7 +63,7 @@ public class TestPeriodicLogMessages {
         output.shouldHaveExitValue(0);
     }
 
-    static class GCTest {
+    public static class GCTest {
         public static void main(String [] args) throws Exception {
             System.out.println("Waiting for messages...");
             Thread.sleep(1000);
@@ -71,5 +71,3 @@ public class TestPeriodicLogMessages {
         }
     }
 }
-
-

@@ -101,7 +101,7 @@ public class ContinuousCallSiteTargetChange {
         }
     }
 
-    static class RecompilationTest {
+    public static class RecompilationTest {
         static final MethodType mt = MethodType.methodType(void.class);
         static final CallSite cs = new MutableCallSite(mt);
 
@@ -135,7 +135,7 @@ public class ContinuousCallSiteTargetChange {
         }
     }
 
-    static class PingPongTest {
+    public static class PingPongTest {
         static final MethodType mt = MethodType.methodType(void.class);
         static final CallSite cs = new MutableCallSite(mt);
 

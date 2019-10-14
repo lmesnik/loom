@@ -1,1 +1,24 @@
 #
+
+
+# Tests failing because ofr ProcessTools wrapper
+
+com/sun/jdi/ProcessAttachTest.java 99999999 generic-all # classname sensitive
+java/util/ResourceBundle/modules/cache/CacheTest.java   99999999 generic-all # messed with import compiling processtools
+java/util/logging/modules/GetResourceBundleTest.java    99999999 generic-all # messed with import compiling processtools
+
+# TODO
+jdk/modules/etc/DefaultModules.java  99999999 generic-all
+jdk/internal/misc/VM/RuntimeArguments.java  99999999 generic-all
+java/lang/StackWalker/CallerFromMain.java 99999999 generic-all
+java/lang/Package/PackageFromManifest.java 99999999 generic-all
+java/lang/Package/IsCompatibleWithDriver.java 99999999 generic-all
+java/lang/invoke/condy/CondyNestedResolutionTest.java 99999999 generic-all
+java/lang/ClassLoader/GetSystemPackage.java 99999999 generic-all
+java/lang/ClassLoader/securityManager/ClassLoaderTest.java 99999999 generic-all
+java/lang/ClassLoader/getResource/modules/ResourcesTest.java 99999999 generic-al
+java/lang/ClassLoader/getResource/automaticmodules/Driver.java 99999999 generic-all
+java/lang/Class/getResource/ResourcesTest.java 99999999 generic-all
+java/lang/Class/forName/modules/TestDriver.java 99999999 generic-all
+
+java/lang/ClassLoader/getResource/modules/ResourcesTest.java 99999999 generic-all

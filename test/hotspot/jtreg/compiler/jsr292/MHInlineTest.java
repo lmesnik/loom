@@ -187,7 +187,7 @@ public class MHInlineTest {
         }
     }
 
-    static class Launcher {
+    public static class Launcher {
         public static void main(String[] args) throws Exception {
             for (int i = 0; i < 20_000; i++) {
                 testPublicMH();

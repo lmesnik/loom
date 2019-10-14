@@ -32,13 +32,6 @@ import jdk.test.lib.process.ProcessTools;
 import jdk.test.lib.process.OutputAnalyzer;
 import sun.hotspot.WhiteBox;
 
-class ErgoArgsPrinter {
-  public static void main(String[] args) throws Exception {
-    WhiteBox wb = WhiteBox.getWhiteBox();
-    wb.printHeapSizes();
-  }
-}
-
 final class MinInitialMaxValues {
   public long minHeapSize;
   public long initialHeapSize;

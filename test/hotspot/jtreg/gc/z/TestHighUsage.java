@@ -35,7 +35,7 @@ import java.util.LinkedList;
 import jdk.test.lib.process.ProcessTools;
 
 public class TestHighUsage {
-    static class Test {
+    public static class Test {
         private static final int K = 1024;
         private static final int M = K * K;
         private static final long maxCapacity = Runtime.getRuntime().maxMemory();

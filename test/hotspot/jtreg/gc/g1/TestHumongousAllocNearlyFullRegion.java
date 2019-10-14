@@ -59,7 +59,7 @@ public class TestHumongousAllocNearlyFullRegion {
         output.shouldHaveExitValue(0);
     }
 
-    static class HumongousObjectAllocator {
+    public static class HumongousObjectAllocator {
         public static void main(String [] args) {
             for (int i = 0; i < heapSize; i++) {
                 // 131069 is the number of longs it takes to fill a heapRegion except
@@ -69,4 +69,3 @@ public class TestHumongousAllocNearlyFullRegion {
         }
     }
 }
-

@@ -83,7 +83,7 @@ public class TestGCId {
     verifyContainsGCIDs(new OutputAnalyzer(pb_default.start()));
   }
 
-  static class GCTest {
+  public static class GCTest {
     private static byte[] garbage;
     public static void main(String [] args) {
       System.out.println("Creating garbage");

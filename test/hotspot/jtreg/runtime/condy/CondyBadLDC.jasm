@@ -26,7 +26,7 @@
  * constant is a double. VerifyError expected.
  */
 
-class CondyBadLDC
+public class CondyBadLDC
 	version 55:0
 {
 

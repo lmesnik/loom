@@ -79,7 +79,7 @@ public class HandshakeTransitionTest {
         output.stdoutShouldContain("JOINED");
     }
 
-    static class Test implements Runnable {
+    public static class Test implements Runnable {
         final static int testLoops = 2000;
         final static int testSleep = 1; //ms
 

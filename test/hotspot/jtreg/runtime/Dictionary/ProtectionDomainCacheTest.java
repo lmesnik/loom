@@ -52,7 +52,7 @@ import jdk.test.lib.process.ProcessTools;
  * Create .jar, load ClassForName from .jar using a URLClassLoader
  */
 public class ProtectionDomainCacheTest {
-    static class Test {
+    public static class Test {
         private static final long TIMEOUT = (long)(5000.0 * Utils.TIMEOUT_FACTOR);
         private static final String TESTCLASSES = System.getProperty("test.classes", ".");
         private static final String CLASSFILENAME = "ClassForName.class";

@@ -135,7 +135,7 @@ public class InlineAccessors {
         o.getArray();
     }
 
-    static class Launcher {
+    public static class Launcher {
         public static void main(String[] args) throws Exception {
             for (int c = 0; c < 20_000; c++) {
               doTest();

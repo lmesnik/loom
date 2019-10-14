@@ -21,46 +21,30 @@
  * questions.
  */
 
-package gc.parallel;
+package gc.g1;
 
-/**
- * @test AdaptiveGCBoundary
- * @key gc regression
- * @requires vm.gc.Parallel
- * @summary UseAdaptiveGCBoundary is broken
- * @bug 8014546
- * @library /test/lib
- * @modules java.base/jdk.internal.misc
- *          java.management
- * @run main/othervm gc.parallel.AdaptiveGCBoundary
- * @author jon.masamitsu@oracle.com
+/*
+ * Common helpers for TestRemsetLogging* tests
  */
+
+import sun.hotspot.WhiteBox;
 
 import jdk.test.lib.process.ProcessTools;
 import jdk.test.lib.process.OutputAnalyzer;
+import java.util.ArrayList;
+import java.util.Arrays;
 
-public class AdaptiveGCBoundary {
-  public static void main(String args[]) throws Exception {
+public class VerifySummaryOutput {
+    public static void main(String[] args) {
+        int numGCs = Integer.parseInt(args[0]);
 
-    ProcessBuilder pb = ProcessTools.createJavaProcessBuilder(
-      "-showversion",
-      "-XX:+UseParallelGC",
-      "-XX:+UseAdaptiveGCBoundary",
-      "-XX:+PrintCommandLineFlags",
-      SystemGCCaller.class.getName()
-      );
-
-    OutputAnalyzer output = new OutputAnalyzer(pb.start());
-
-    output.shouldContain("+UseAdaptiveGCBoundary");
-
-    output.shouldNotContain("error");
-
-    output.shouldHaveExitValue(0);
-  }
-  public static class SystemGCCaller {
-    public static void main(String [] args) {
-      System.gc();
+        // Perform the requested amount of GCs.
+        WhiteBox wb = WhiteBox.getWhiteBox();
+        for (int i = 0; i < numGCs - 1; i++) {
+            wb.youngGC();
+        }
+        if (numGCs > 0) {
+          wb.fullGC();
+        }
     }
-  }
 }

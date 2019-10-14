@@ -99,7 +99,7 @@ public class TestNumWorkerOutput {
         runTest(args[0]);
     }
 
-    static class GCTest {
+    public static class GCTest {
         private static final WhiteBox WB = WhiteBox.getWhiteBox();
 
         public static Object holder;
@@ -111,4 +111,3 @@ public class TestNumWorkerOutput {
         }
     }
 }
-

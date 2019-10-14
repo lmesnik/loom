@@ -271,7 +271,7 @@ public class TestGCLogMessages {
     }
 
 
-    static class GCTest {
+    public static class GCTest {
         private static byte[] garbage;
         public static void main(String [] args) {
             System.out.println("Creating garbage");
@@ -283,7 +283,7 @@ public class TestGCLogMessages {
         }
     }
 
-    static class GCTestWithToSpaceExhaustion {
+    public static class GCTestWithToSpaceExhaustion {
         private static byte[] garbage;
         private static byte[] largeObject;
         public static void main(String [] args) {
@@ -298,7 +298,7 @@ public class TestGCLogMessages {
         }
     }
 
-    static class GCTestWithInitialMark {
+    public static class GCTestWithInitialMark {
         public static void main(String [] args) {
             sun.hotspot.WhiteBox WB = sun.hotspot.WhiteBox.getWhiteBox();
             WB.g1StartConcMarkCycle();
@@ -306,4 +306,3 @@ public class TestGCLogMessages {
     }
 
 }
-

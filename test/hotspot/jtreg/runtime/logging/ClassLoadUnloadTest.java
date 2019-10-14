@@ -44,7 +44,7 @@ import java.util.List;
 public class ClassLoadUnloadTest {
     private static OutputAnalyzer out;
     private static ProcessBuilder pb;
-    private static class ClassUnloadTestMain {
+    public static class ClassUnloadTestMain {
         public static void main(String... args) throws Exception {
             String className = "test.Empty";
             ClassLoader cl = ClassUnloadCommon.newClassLoader();

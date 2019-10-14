@@ -25,7 +25,7 @@
  * This test contains ldc_w instructions of condy's who generate dynamic constants
  * of the following types: byte, char, short, int, float, boolean.
  */
-class CondyUseLDC_W
+public class CondyUseLDC_W
 	version 55:0
 {
 
@@ -304,4 +304,4 @@ public static Method main:"([Ljava/lang/String;)V"
 		return;
 }
 
-} // end Class CondyUseLDC_W 
+} // end Class CondyUseLDC_W

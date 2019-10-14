@@ -49,7 +49,7 @@ public class ShutdownTest {
        obj = new Object[100000];
    }
 
-    static class ShutdownTestThread extends Thread {
+   public static class ShutdownTestThread extends Thread {
        public void run() {
          while (true) {
            ShutdownTest st = new ShutdownTest();

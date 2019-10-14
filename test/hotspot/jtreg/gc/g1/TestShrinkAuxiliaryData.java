@@ -151,7 +151,7 @@ public class TestShrinkAuxiliaryData {
         return (63 - (int) Long.numberOfLeadingZeros(availablePointersCount));
     }
 
-    static class ShrinkAuxiliaryDataTest {
+    public static class ShrinkAuxiliaryDataTest {
 
         public static void main(String[] args) throws IOException {
 

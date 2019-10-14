@@ -1029,7 +1029,7 @@ var getJibProfilesDependencies = function (input, common) {
         jtreg: {
             organization: common.organization,
             ext: "zip",
-            revision: "4.2-fiber-1.0",
+            revision: "4.2-fiber-1.1",
             environment_name: "JT_HOME",
             environment_path: input.get("jtreg", "install_path") + "/jtreg/bin"
         },

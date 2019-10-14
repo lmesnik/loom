@@ -22,7 +22,7 @@
  * questions.
  */
 
-class Test {
+public class Test {
 
     static boolean loadLib(String libName){
         try {

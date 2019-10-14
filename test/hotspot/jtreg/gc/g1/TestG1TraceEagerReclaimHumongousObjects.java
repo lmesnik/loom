@@ -66,7 +66,7 @@ public class TestG1TraceEagerReclaimHumongousObjects {
     output.shouldHaveExitValue(0);
   }
 
-  static class GCWithHumongousObjectTest {
+  public static class GCWithHumongousObjectTest {
 
     public static final int M = 1024*1024;
     public static LinkedList<Object> garbageList = new LinkedList<Object>();

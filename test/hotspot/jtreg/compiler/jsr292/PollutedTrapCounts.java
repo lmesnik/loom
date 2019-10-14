@@ -55,7 +55,7 @@ public class PollutedTrapCounts {
         analyzer.shouldNotContain("not compilable (disabled)");
     }
 
-    static class Test {
+    public static class Test {
         public static final MethodHandle test1;
         public static final MethodHandle test2;
         public static final MethodHandle empty;

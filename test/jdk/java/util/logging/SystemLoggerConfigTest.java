@@ -49,7 +49,6 @@ import sun.util.logging.PlatformLogger;
  * @bug     8159245
  * @summary Tests configuration of loggers.
  * @modules java.logging/sun.util.logging.internal java.base/sun.util.logging
- * @run  main/othervm SystemLoggerConfigTest NOSECURITY
  * @run  main/othervm SystemLoggerConfigTest WITHSECURITY
  *
  * @author danielfuchs

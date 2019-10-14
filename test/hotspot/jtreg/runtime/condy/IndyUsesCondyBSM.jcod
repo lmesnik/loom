@@ -28,7 +28,7 @@
  */
 
 /*
-class IndyUsesCondyBSM {
+public class IndyUsesCondyBSM {
     IndyUsesCondyBSM() { }
     public static Object Condybsm(java.lang.invoke.MethodHandles$Lookup, java.lang.String, java.lang.Class) {
         System.out.println("In Condybsm");
@@ -49,7 +49,7 @@ class IndyUsesCondyBSM {
     }
     public static int m() {
         // ldc_w dynamic where the BSM = slot #0 in the BootstrapMethods array is IndyUsesCondyBSM.Condybsm() -> succeeds
-        // invokedynamic where the BSM = slot #0 in the BootstrapMethods array is IndyUsesCondyBSM.Condybsm()  -> receives a BootstrapMethodError 
+        // invokedynamic where the BSM = slot #0 in the BootstrapMethods array is IndyUsesCondyBSM.Condybsm()  -> receives a BootstrapMethodError
         return Callsite.foo();
     }
     public static void main(String[] args) {
@@ -160,7 +160,7 @@ class IndyUsesCondyBSM {
     NameAndType #40 #35; // #87     at 0x0501
   } // Constant Pool
 
-  0x0000; // access [ ]
+  0x0001; // access [ ]
   #5;// this_cpx
   #62;// super_cpx
 

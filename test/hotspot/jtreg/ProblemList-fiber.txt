@@ -1,7 +1,85 @@
 #
 
 
-#### Temporary excluded, failed with fiber but because of wrapper
+# Fail intermitently?
+runtime/8176717/TestInheritFD.java 99999998 generic-all
+
+# Doesn't work with ProcessTools wrapper
+
+serviceability/sa/ClhsdbCDSCore.java 99999998 generic-all
+serviceability/logging/TestLogRotation.java 99999998 generic-all
+
+compiler/c2/Test8062950.java 99999998 generic-all # Test tries to load non-existing class and fails
+
+# Custom cp adding (overriding -cp)
+runtime/verifier/TestMultiANewArray.java 99999998 generic-all
+runtime/verifier/OverriderMsg.java 99999998 generic-all
+runtime/verifier/TestANewArray.java 99999998 generic-all
+runtime/StackTrace/LargeClassTest.java 99999998 generic-all
+runtime/LocalVariableTable/TestLVT.java 99999998 generic-all
+runtime/duplAttributes/DuplAttributesTest.java 99999998 generic-all
+runtime/EnclosingMethodAttr/EnclMethodAttr.java 99999998 generic-all
+
+runtime/classFileParserBug/TestEmptyBootstrapMethodsAttr.java 99999998 generic-all
+runtime/classFileParserBug/ClassFileParserBug.java 99999998 generic-all
+runtime/ClassFile/UnsupportedClassFileVersion.java 99999998 generic-all
+runtime/ClassFile/JsrRewriting.java 99999998 generic-all
+runtime/ClassFile/OomWhileParsingRepeatedJsr.java 99999998 generic-all
+
+runtime/cds/appcds/ClassLoaderTest.java 99999998 generic-all
+runtime/cds/appcds/HelloTest.java 99999998 generic-all
+runtime/cds/appcds/sharedStrings/SharedStringsBasic.java 99999998 generic-all
+runtime/cds/BootAppendTests.java 99999998 generic-all
+
+runtime/BootstrapMethod/BSMCalledTwice.java 99999998 generic-all
+
+compiler/aot/fingerprint/SelfChangedCDS.java 99999998 generic-all
+compiler/aot/verification/ClassAndLibraryNotMatchTest.java 99999998 generic-all
+
+###### TODO
+compiler/aot/fingerprint/SelfChangedCDS.java 99999998 generic-all
+compiler/aot/verification/ClassAndLibraryNotMatchTest.java 99999998 generic-all
+gc/TestSmallHeap.java 99999998 generic-all
+gc/TestVerifySilently.java 99999998 generic-all
+gc/TestVerifySubSet.java 99999998 generic-all
+gc/arguments/TestNewSizeThreadIncrease.java 99999998 generic-all
+gc/cms/GuardShrinkWarning.java 99999998 generic-all
+gc/concurrent_phase_control/TestConcurrentPhaseControlG1.java 99999998 generic-all
+gc/ergonomics/TestDynamicNumberOfGCThreads.java 99999998 generic-all
+gc/g1/TestEagerReclaimHumongousRegions.java 99999998 generic-all
+gc/g1/TestEagerReclaimHumongousRegionsClearMarkBits.java 99999998 generic-all
+gc/g1/TestEagerReclaimHumongousRegionsWithRefs.java 99999998 generic-all
+gc/g1/TestHumongousAllocInitialMark.java 99999998 generic-all
+gc/g1/TestHumongousCodeCacheRoots.java 99999998 generic-all
+gc/g1/TestPLABSizeBounds.java 99999998 generic-all
+gc/g1/TestPrintRegionRememberedSetInfo.java 99999998 generic-all
+gc/g1/mixedgc/TestLogging.java 99999998 generic-all
+gc/logging/TestDeprecatedPrintFlags.java 99999998 generic-all
+gc/logging/TestMetaSpaceLog.java 99999998 generic-all
+gc/logging/TestPrintReferences.java 99999998 generic-all
+gc/serial/HeapChangeLogging.java 99999998 generic-all
+serviceability/sa/TestCpoolForInvokeDynamic.java 99999998 generic-all
+
+
+# Sensitive to main class
+runtime/logging/VtablesTest.java 99999998 generic-all
+runtime/BootstrapMethod/TestLambdaExceptionInInitializer.java 99999998 generic-all
+
+# dont run classname (-version/empty)
+runtime/symboltable/ShortLivedSymbolCleanup.java 99999998 generic-all
+runtime/logging/LoaderConstraintsTest.java 99999998 generic-all
+
+# TBD
+# Seems module patching doesn't work with wrapper
+runtime/modules/PatchModule/PatchModuleTestJarDir.java 99999998 generic-all
+runtime/modules/PatchModule/PatchModuleJavaBase.java 99999998 generic-all
+runtime/modules/PatchModule/PatchModuleTestJar.java 99999998 generic-all
+runtime/modules/PatchModule/PatchModuleTest.java 99999998 generic-all
+runtime/modules/PatchModule/PatchModuleClassList.java 99999998 generic-all
+
+
+
+#### Temporary excluded, failed with fiber but because of JDI wrapper
 vmTestbase/nsk/jdi/ClassPrepareEvent/referenceType/refType001/TestDescription.java 99999998 generic-all
 vmTestbase/nsk/jdi/ClassPrepareEvent/thread/thread001/TestDescription.java 99999998 generic-all
 vmTestbase/nsk/jdi/ClassUnloadEvent/className/classname001/TestDescription.java 99999998 generic-all

@@ -34,21 +34,6 @@ import jdk.test.lib.process.OutputAnalyzer;
 import java.util.ArrayList;
 import java.util.Arrays;
 
-class VerifySummaryOutput {
-    public static void main(String[] args) {
-        int numGCs = Integer.parseInt(args[0]);
-
-        // Perform the requested amount of GCs.
-        WhiteBox wb = WhiteBox.getWhiteBox();
-        for (int i = 0; i < numGCs - 1; i++) {
-            wb.youngGC();
-        }
-        if (numGCs > 0) {
-          wb.fullGC();
-        }
-    }
-}
-
 public class TestRemsetLoggingTools {
 
     public static String runTest(String[] additionalArgs, int numGCs) throws Exception {
