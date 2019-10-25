@@ -647,7 +647,7 @@ public final class ProcessTools {
     public static void main(String[] args) throws Throwable {
         String wrapper = args[0];
         String className = args[1];
-        String[] classArgs = new String[args.length - 1];
+        String[] classArgs = new String[args.length - 2];
         System.arraycopy(args, 2, classArgs, 0, args.length - 2);
         Class c = Class.forName(className);
         Method mainMethod = c.getMethod("main", new Class[] { String[].class });

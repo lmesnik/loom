@@ -1,5 +1,36 @@
-#
+##########
+## Tests failing when main() is executed in additional fiber or in fiber instead of thread
 
+# OOME in unexpected thread
+gc/g1/ihop/TestIHOPStatic.java
+
+
+# Test failing because of incorrect stacktrace for main thread
+runtime/Throwable/TestThrowable.java
+runtime/handshake/HandshakeWalkStackTest.java
+runtime/handshake/HandshakeWalkStackFallbackTest.java
+runtime/ErrorHandling/TestCrashOnOutOfMemoryError.java
+runtime/ErrorHandling/TestExitOnOutOfMemoryError.java
+runtime/ErrorHandling/TestHeapDumpPath.java
+runtime/ErrorHandling/TestOnOutOfMemoryError.java
+runtime/Throwable/StackTraceLogging.java
+runtime/Throwable/TestMaxJavaStackTraceDepth.java
+
+####
+## TODO check what is the cds issues with fiber
+runtime/cds/serviceability/ReplaceCriticalClasses.java
+runtime/cds/serviceability/ReplaceCriticalClassesForSubgraphs.java
+runtime/cds/TestInterpreterMethodEntries.java#id0
+runtime/cds/TestInterpreterMethodEntries.java#id1
+
+### Something wrong with test.jdk/test.src properties
+runtime/Dictionary/ProtectionDomainCacheTest.java
+runtime/jni/checked/TestCheckedEnsureLocalCapacity.java
+runtime/Dictionary/ProtectionDomainCacheTest.java
+
+
+##########################################
+## Tests are executed when ProcessTools execute main() in separated fiber
 
 # Fail intermitently?
 runtime/8176717/TestInheritFD.java 99999998 generic-all
@@ -36,7 +67,8 @@ runtime/BootstrapMethod/BSMCalledTwice.java 99999998 generic-all
 compiler/aot/fingerprint/SelfChangedCDS.java 99999998 generic-all
 compiler/aot/verification/ClassAndLibraryNotMatchTest.java 99999998 generic-all
 
-###### TODO
+###### TODO re-check
+# Most of tests failed because can't just run clas in wrapper
 compiler/aot/fingerprint/SelfChangedCDS.java 99999998 generic-all
 compiler/aot/verification/ClassAndLibraryNotMatchTest.java 99999998 generic-all
 gc/TestSmallHeap.java 99999998 generic-all
@@ -59,7 +91,7 @@ gc/logging/TestMetaSpaceLog.java 99999998 generic-all
 gc/logging/TestPrintReferences.java 99999998 generic-all
 gc/serial/HeapChangeLogging.java 99999998 generic-all
 serviceability/sa/TestCpoolForInvokeDynamic.java 99999998 generic-all
-
+gc/TestSmallHeap.java
 
 # Sensitive to main class
 runtime/logging/VtablesTest.java 99999998 generic-all
