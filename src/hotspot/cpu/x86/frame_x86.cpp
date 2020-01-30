@@ -155,7 +155,7 @@ bool frame::safe_for_sender(JavaThread *thread) {
     }
 
     if (Continuation::is_return_barrier_entry(sender_pc)) {	
-      Continuation::fix_continuation_bottom_sender(thread, *this, &sender_pc, &sender_sp, &saved_fp);	
+      Continuation::fix_continuation_bottom_sender(thread, *this, &sender_pc, &sender_sp);	
     }
 
     // If the potential sender is the interpreter then we can do some more checking
@@ -448,7 +448,7 @@ frame frame::sender_for_interpreter_frame(RegisterMap* map) const {
     if (map->walk_cont()) { // about to walk into an h-stack	
       return Continuation::top_frame(*this, map);	
     } else {
-      Continuation::fix_continuation_bottom_sender(map, *this, &sender_pc, &unextended_sp, &sender_fp);
+      Continuation::fix_continuation_bottom_sender(map, *this, &sender_pc, &unextended_sp);
     }
   }
   return frame(sender_sp, unextended_sp, sender_fp, sender_pc);
@@ -606,8 +606,9 @@ void frame::describe_pd(FrameValues& values, int frame_no) {
     DESCRIBE_FP_OFFSET(interpreter_frame_bcp);
     DESCRIBE_FP_OFFSET(interpreter_frame_initial_sp);
   } else if (is_compiled_frame()) {
-    values.describe(frame_no, real_fp() - return_addr_offset, "return address");
-    values.describe(frame_no, real_fp() - sender_sp_offset,   "saved fp", 2);
+    address ret_pc = *(address*)(real_fp() - return_addr_offset);
+    values.describe(frame_no, real_fp() - return_addr_offset, Continuation::is_return_barrier_entry(ret_pc) ? "return address (return barrier)" : "return address");
+    values.describe(-1, real_fp() - sender_sp_offset, "saved fp", 2);
 #ifdef AMD64
   } else if (is_entry_frame()) {
     // This could be more descriptive if we use the enum in

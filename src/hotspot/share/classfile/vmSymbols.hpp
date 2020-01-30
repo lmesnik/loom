@@ -61,8 +61,10 @@
   template(java_lang_StringLatin1,                    "java/lang/StringLatin1")                   \
   template(java_lang_StringUTF16,                     "java/lang/StringUTF16")                    \
   template(java_lang_Thread,                          "java/lang/Thread")                         \
+  template(java_lang_Thread_FieldHolder,              "java/lang/Thread$FieldHolder")             \
+  template(java_lang_Thread_VirtualThreads,           "java/lang/Thread$VirtualThreads")          \
   template(java_lang_ThreadGroup,                     "java/lang/ThreadGroup")                    \
-  template(java_lang_Fiber,                           "java/lang/Fiber")                          \
+  template(java_lang_VirtualThread,                   "java/lang/VirtualThread")                  \
   template(java_lang_Cloneable,                       "java/lang/Cloneable")                      \
   template(java_lang_Throwable,                       "java/lang/Throwable")                      \
   template(java_lang_ClassLoader,                     "java/lang/ClassLoader")                    \
@@ -71,6 +73,7 @@
   template(java_lang_Runnable,                        "java/lang/Runnable")                       \
   /*template(java_lang_Continuation,                    "java/lang/Continuation")                 */\
   template(java_lang_ContinuationScope,               "java/lang/ContinuationScope")              \
+  template(jdk_internal_misc_StackChunk,              "jdk/internal/misc/StackChunk")             \
   template(java_lang_Boolean,                         "java/lang/Boolean")                        \
   template(java_lang_Character,                       "java/lang/Character")                      \
   template(java_lang_Character_CharacterCache,        "java/lang/Character$CharacterCache")       \
@@ -98,6 +101,7 @@
   template(java_lang_reflect_Field,                   "java/lang/reflect/Field")                  \
   template(java_lang_reflect_Parameter,               "java/lang/reflect/Parameter")              \
   template(java_lang_reflect_Array,                   "java/lang/reflect/Array")                  \
+  template(java_lang_reflect_RecordComponent,         "java/lang/reflect/RecordComponent")        \
   template(java_lang_StringBuffer,                    "java/lang/StringBuffer")                   \
   template(java_lang_StringBuilder,                   "java/lang/StringBuilder")                  \
   template(java_lang_CharSequence,                    "java/lang/CharSequence")                   \
@@ -131,6 +135,7 @@
   template(jdk_internal_vm_PostVMInitHook,            "jdk/internal/vm/PostVMInitHook")           \
   template(sun_net_www_ParseUtil,                     "sun/net/www/ParseUtil")                    \
   template(java_util_Iterator,                        "java/util/Iterator")                       \
+  template(java_lang_Record,                          "java/lang/Record")                       \
                                                                                                   \
   template(jdk_internal_loader_ClassLoaders_AppClassLoader,      "jdk/internal/loader/ClassLoaders$AppClassLoader")      \
   template(jdk_internal_loader_ClassLoaders_PlatformClassLoader, "jdk/internal/loader/ClassLoaders$PlatformClassLoader") \
@@ -139,6 +144,8 @@
   template(java_lang_VersionProps,                    "java/lang/VersionProps")                   \
   template(java_runtime_name_name,                    "java_runtime_name")                        \
   template(java_runtime_version_name,                 "java_runtime_version")                     \
+  template(java_runtime_vendor_version_name,          "VENDOR_VERSION")                           \
+  template(java_runtime_vendor_vm_bug_url_name,       "VENDOR_URL_VM_BUG")                        \
                                                                                                   \
   /* system initialization */                                                                     \
   template(initPhase1_name,                           "initPhase1")                               \
@@ -163,6 +170,7 @@
   template(tag_deprecated,                            "Deprecated")                               \
   template(tag_source_debug_extension,                "SourceDebugExtension")                     \
   template(tag_signature,                             "Signature")                                \
+  template(tag_record,                                "Record")                                   \
   template(tag_runtime_visible_annotations,           "RuntimeVisibleAnnotations")                \
   template(tag_runtime_invisible_annotations,         "RuntimeInvisibleAnnotations")              \
   template(tag_runtime_visible_parameter_annotations, "RuntimeVisibleParameterAnnotations")       \
@@ -247,6 +255,7 @@
   template(reflect_Reflection,                        "jdk/internal/reflect/Reflection")              \
   template(reflect_CallerSensitive,                   "jdk/internal/reflect/CallerSensitive")         \
   template(reflect_CallerSensitive_signature,         "Ljdk/internal/reflect/CallerSensitive;")       \
+  template(reflect_NativeConstructorAccessorImpl,     "jdk/internal/reflect/NativeConstructorAccessorImpl")\
   template(checkedExceptions_name,                    "checkedExceptions")                        \
   template(clazz_name,                                "clazz")                                    \
   template(exceptionTypes_name,                       "exceptionTypes")                           \
@@ -382,11 +391,17 @@
   template(entrySP_name,                              "entrySP")                                  \
   template(entryFP_name,                              "entryFP")                                  \
   template(entryPC_name,                              "entryPC")                                  \
+  template(tail_name,                                 "tail")                                     \
+  template(size_name,                                 "size")                                     \
+  template(argsize_name,                              "argsize")                                  \
+  template(mode_name,                                 "mode")                                     \
+  template(numFrames_name,                            "numFrames")                                \
+  template(numOops_name,                              "numOops")                                  \
   template(stack_name,                                "stack")                                    \
   template(maxSize_name,                              "maxSize")                                  \
   template(reset_name,                                "reset")                                    \
+  template(done_name,                                 "done")                                     \
   template(mounted_name,                              "mounted")                                  \
-  template(numFrames_name,                            "numFrames")                                \
   template(numInterpretedFrames_name,                 "numInterpretedFrames")                     \
   template(fp_name,                                   "fp")                                       \
   template(sp_name,                                   "sp")                                       \
@@ -529,7 +544,8 @@
   template(runnable_signature,                        "Ljava/lang/Runnable;")                     \
   template(continuation_signature,                    "Ljava/lang/Continuation;")                 \
   template(continuationscope_signature,               "Ljava/lang/ContinuationScope;")            \
-  template(fiber_signature,                           "Ljava/lang/Fiber;")                        \
+  template(stackchunk_signature,                      "Ljdk/internal/misc/StackChunk;")           \
+  template(vthread_signature,                         "Ljava/lang/VirtualThread;")                \
   template(object_void_signature,                     "(Ljava/lang/Object;)V")                    \
   template(object_int_signature,                      "(Ljava/lang/Object;)I")                    \
   template(object_boolean_signature,                  "(Ljava/lang/Object;)Z")                    \
@@ -572,6 +588,7 @@
   template(accesscontrolcontext_signature,            "Ljava/security/AccessControlContext;")                     \
   template(class_protectiondomain_signature,          "(Ljava/lang/Class;Ljava/security/ProtectionDomain;)V")     \
   template(thread_signature,                          "Ljava/lang/Thread;")                                       \
+  template(thread_fieldholder_signature,              "Ljava/lang/Thread$FieldHolder;")                           \
   template(thread_array_signature,                    "[Ljava/lang/Thread;")                                      \
   template(threadgroup_signature,                     "Ljava/lang/ThreadGroup;")                                  \
   template(threadgroup_array_signature,               "[Ljava/lang/ThreadGroup;")                                 \
@@ -594,6 +611,8 @@
   template(char_StringBuffer_signature,               "(C)Ljava/lang/StringBuffer;")                              \
   template(int_String_signature,                      "(I)Ljava/lang/String;")                                    \
   template(boolean_boolean_int_signature,             "(ZZ)I")                                                    \
+  template(big_integer_shift_worker_signature,        "([I[IIII)V")                                               \
+  template(reflect_method_signature,                  "Ljava/lang/reflect/Method;")                                                    \
   /* signature symbols needed by intrinsics */                                                                    \
   VM_INTRINSICS_DO(VM_INTRINSIC_IGNORE, VM_SYMBOL_IGNORE, VM_SYMBOL_IGNORE, template, VM_ALIAS_IGNORE)            \
                                                                                                                   \
@@ -801,6 +820,7 @@
   do_name(tan_name,"tan")       do_name(atan2_name,"atan2")     do_name(sqrt_name,"sqrt")                               \
   do_name(log_name,"log")       do_name(log10_name,"log10")     do_name(pow_name,"pow")                                 \
   do_name(exp_name,"exp")       do_name(min_name,"min")         do_name(max_name,"max")                                 \
+  do_name(floor_name, "floor")  do_name(ceil_name, "ceil")      do_name(rint_name, "rint")                              \
                                                                                                                         \
   do_name(addExact_name,"addExact")                                                                                     \
   do_name(decrementExact_name,"decrementExact")                                                                         \
@@ -816,6 +836,9 @@
   do_intrinsic(_iabs,                     java_lang_Math,         abs_name,   int_int_signature,           F_S)   \
   do_intrinsic(_labs,                     java_lang_Math,         abs_name,   long_long_signature,           F_S)   \
   do_intrinsic(_dsin,                     java_lang_Math,         sin_name,   double_double_signature,           F_S)   \
+  do_intrinsic(_floor,                    java_lang_Math,         floor_name, double_double_signature,           F_S)   \
+  do_intrinsic(_ceil,                     java_lang_Math,         ceil_name,  double_double_signature,           F_S)   \
+  do_intrinsic(_rint,                     java_lang_Math,         rint_name,  double_double_signature,           F_S)   \
   do_intrinsic(_dcos,                     java_lang_Math,         cos_name,   double_double_signature,           F_S)   \
   do_intrinsic(_dtan,                     java_lang_Math,         tan_name,   double_double_signature,           F_S)   \
   do_intrinsic(_datan2,                   java_lang_Math,         atan2_name, double2_double_signature,          F_S)   \
@@ -890,9 +913,6 @@
   do_intrinsic(_arraycopy,                java_lang_System,       arraycopy_name, arraycopy_signature,           F_S)   \
    do_name(     arraycopy_name,                                  "arraycopy")                                           \
    do_signature(arraycopy_signature,                             "(Ljava/lang/Object;ILjava/lang/Object;II)V")          \
-  do_intrinsic(_isInterrupted,            java_lang_Thread,       isInterrupted_name, isInterrupted_signature,   F_R)   \
-   do_name(     isInterrupted_name,                              "isInterrupted")                                       \
-   do_signature(isInterrupted_signature,                         "(Z)Z")                                                \
   do_intrinsic(_currentThread,            java_lang_Thread,       currentThread_name, currentThread_signature,   F_S)   \
    do_name(     currentThread_name,                              "currentThread0")                                      \
    do_signature(currentThread_signature,                         "()Ljava/lang/Thread;")                                \
@@ -1033,6 +1053,12 @@
   do_intrinsic(_montgomerySquare,      java_math_BigInteger, montgomerySquare_name, montgomerySquare_signature, F_S)    \
    do_name(     montgomerySquare_name,                             "implMontgomerySquare")                              \
    do_signature(montgomerySquare_signature,                        "([I[IIJ[I)[I")                                      \
+                                                                                                                        \
+  do_intrinsic(_bigIntegerRightShiftWorker, java_math_BigInteger, rightShift_name, big_integer_shift_worker_signature, F_S) \
+   do_name(     rightShift_name,                                 "shiftRightImplWorker")                                \
+                                                                                                                        \
+  do_intrinsic(_bigIntegerLeftShiftWorker, java_math_BigInteger, leftShift_name, big_integer_shift_worker_signature, F_S) \
+   do_name(     leftShift_name,                                 "shiftLeftImplWorker")                                  \
                                                                                                                         \
   do_class(jdk_internal_util_ArraysSupport, "jdk/internal/util/ArraysSupport")                                                          \
   do_intrinsic(_vectorizedMismatch, jdk_internal_util_ArraysSupport, vectorizedMismatch_name, vectorizedMismatch_signature, F_S)\

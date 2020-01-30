@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -492,7 +492,7 @@ void os::initialize_jdk_signal_support(TRAPS) {
                             thread_oop,
                             CHECK);
 
-    { MutexLocker mu(Threads_lock);
+    { MutexLocker mu(THREAD, Threads_lock);
       JavaThread* signal_thread = new JavaThread(&signal_thread_entry);
 
       // At this point it may be possible that no osthread was created for the
@@ -535,14 +535,6 @@ void* os::native_java_library() {
   if (_native_java_library == NULL) {
     char buffer[JVM_MAXPATHLEN];
     char ebuf[1024];
-
-    // Try to load verify dll first. In 1.3 java dll depends on it and is not
-    // always able to find it when the loading executable is outside the JDK.
-    // In order to keep working with 1.2 we ignore any loading errors.
-    if (dll_locate_lib(buffer, sizeof(buffer), Arguments::get_dll_dir(),
-                       "verify")) {
-      dll_load(buffer, ebuf, sizeof(ebuf));
-    }
 
     // Load java dll
     if (dll_locate_lib(buffer, sizeof(buffer), Arguments::get_dll_dir(),
@@ -676,7 +668,7 @@ static bool has_reached_max_malloc_test_peak(size_t alloc_size) {
     if ((cur_malloc_words + words) > MallocMaxTestWords) {
       return true;
     }
-    Atomic::add(words, &cur_malloc_words);
+    Atomic::add(&cur_malloc_words, words);
   }
   return false;
 }
@@ -763,8 +755,8 @@ void* os::realloc(void *memblock, size_t size, MEMFLAGS memflags, const NativeCa
   NOT_PRODUCT(inc_stat_counter(&num_mallocs, 1));
   NOT_PRODUCT(inc_stat_counter(&alloc_bytes, size));
    // NMT support
-  void* membase = MemTracker::record_free(memblock);
   NMT_TrackingLevel level = MemTracker::tracking_level();
+  void* membase = MemTracker::record_free(memblock, level);
   size_t  nmt_header_size = MemTracker::malloc_header_size(level);
   void* ptr = ::realloc(membase, size + nmt_header_size);
   return MemTracker::record_malloc(ptr, size, memflags, stack, level);
@@ -805,7 +797,7 @@ void  os::free(void *memblock) {
     log_warning(malloc, free)("os::free caught " PTR_FORMAT, p2i(memblock));
     breakpoint();
   }
-  void* membase = MemTracker::record_free(memblock);
+  void* membase = MemTracker::record_free(memblock, MemTracker::tracking_level());
   verify_memory(membase);
 
   GuardedMemory guarded(membase);
@@ -814,7 +806,7 @@ void  os::free(void *memblock) {
   membase = guarded.release_for_freeing();
   ::free(membase);
 #else
-  void* membase = MemTracker::record_free(memblock);
+  void* membase = MemTracker::record_free(memblock, MemTracker::tracking_level());
   ::free(membase);
 #endif
 }
@@ -863,7 +855,7 @@ int os::random() {
   while (true) {
     unsigned int seed = _rand_seed;
     unsigned int rand = random_helper(seed);
-    if (Atomic::cmpxchg(rand, &_rand_seed, seed) == seed) {
+    if (Atomic::cmpxchg(&_rand_seed, seed, rand) == seed) {
       return static_cast<int>(rand);
     }
   }
@@ -934,6 +926,14 @@ void os::print_hex_dump(outputStream* st, address start, address end, int unitsi
     }
   }
   st->cr();
+}
+
+void os::print_dhm(outputStream* st, const char* startStr, long sec) {
+  long days    = sec/86400;
+  long hours   = (sec/3600) - (days * 24);
+  long minutes = (sec/60) - (days * 1440) - (hours * 60);
+  if (startStr == NULL) startStr = "";
+  st->print_cr("%s %ld days %ld:%02ld hours", startStr, days, hours, minutes);
 }
 
 void os::print_instructions(outputStream* st, address pc, int unitsize) {
@@ -1812,7 +1812,7 @@ void os::realign_memory(char *addr, size_t bytes, size_t alignment_hint) {
 os::SuspendResume::State os::SuspendResume::switch_state(os::SuspendResume::State from,
                                                          os::SuspendResume::State to)
 {
-  os::SuspendResume::State result = Atomic::cmpxchg(to, &_state, from);
+  os::SuspendResume::State result = Atomic::cmpxchg(&_state, from, to);
   if (result == from) {
     // success
     return to;

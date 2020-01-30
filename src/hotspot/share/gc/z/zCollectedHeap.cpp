@@ -33,6 +33,7 @@
 #include "gc/z/zServiceability.hpp"
 #include "gc/z/zStat.hpp"
 #include "gc/z/zUtils.inline.hpp"
+#include "memory/iterator.hpp"
 #include "memory/universe.hpp"
 #include "runtime/mutexLocker.hpp"
 #include "utilities/align.hpp"
@@ -112,6 +113,10 @@ bool ZCollectedHeap::is_maximal_no_gc() const {
 
 bool ZCollectedHeap::is_in(const void* p) const {
   return _heap.is_in((uintptr_t)p);
+}
+
+bool ZCollectedHeap::requires_barriers(oop obj) const {
+  return !_heap.is_allocating(cast_from_oop<uintptr_t>(obj));
 }
 
 uint32_t ZCollectedHeap::hash_oop(oop obj) const {
@@ -246,8 +251,8 @@ void ZCollectedHeap::object_iterate(ObjectClosure* cl) {
   _heap.object_iterate(cl, true /* visit_weaks */);
 }
 
-void ZCollectedHeap::safe_object_iterate(ObjectClosure* cl) {
-  _heap.object_iterate(cl, true /* visit_weaks */);
+void ZCollectedHeap::keep_alive(oop obj) {
+  _heap.keep_alive(obj);
 }
 
 void ZCollectedHeap::register_nmethod(nmethod* nm) {

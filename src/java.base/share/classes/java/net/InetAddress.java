@@ -31,7 +31,6 @@ import java.util.Objects;
 import java.util.Scanner;
 import java.security.AccessController;
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.ObjectStreamException;
 import java.io.ObjectStreamField;
 import java.io.IOException;
@@ -46,6 +45,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.Arrays;
+import java.util.concurrent.locks.ReentrantLock;
 
 import jdk.internal.access.JavaNetInetAddressAccess;
 import jdk.internal.access.SharedSecrets;
@@ -53,6 +53,7 @@ import jdk.internal.misc.Blocker;
 import sun.security.action.*;
 import sun.net.InetAddressCachePolicy;
 import sun.net.util.IPAddressUtil;
+import sun.nio.cs.UTF_8;
 
 /**
  * This class represents an Internet Protocol (IP) address.
@@ -197,8 +198,7 @@ import sun.net.util.IPAddressUtil;
  * @see     java.net.InetAddress#getLocalHost()
  * @since 1.0
  */
-public
-class InetAddress implements java.io.Serializable {
+public class InetAddress implements java.io.Serializable {
 
     @Native static final int PREFER_IPV4_VALUE = 0;
     @Native static final int PREFER_IPV6_VALUE = 1;
@@ -328,9 +328,17 @@ class InetAddress implements java.io.Serializable {
 
                     public InetAddress getByName(String hostName,
                                                  InetAddress hostAddress)
-                            throws UnknownHostException
+                        throws UnknownHostException
                     {
                         return InetAddress.getByName(hostName, hostAddress);
+                    }
+
+                    public int addressValue(Inet4Address inet4Address) {
+                        return inet4Address.addressValue();
+                    }
+
+                    public byte[] addressBytes(Inet6Address inet6Address) {
+                        return inet6Address.addressBytes();
                     }
                 }
         );
@@ -815,6 +823,7 @@ class InetAddress implements java.io.Serializable {
     private static final class NameServiceAddresses implements Addresses {
         private final String host;
         private final InetAddress reqAddr;
+        private final ReentrantLock lookupLock = new ReentrantLock();
 
         NameServiceAddresses(String host, InetAddress reqAddr) {
             this.host = host;
@@ -826,7 +835,8 @@ class InetAddress implements java.io.Serializable {
             Addresses addresses;
             // only one thread is doing lookup to name service
             // for particular host at any time.
-            synchronized (this) {
+            lookupLock.lock();
+            try {
                 // re-check that we are still us + re-install us if slot empty
                 addresses = cache.putIfAbsent(host, this);
                 if (addresses == null) {
@@ -874,6 +884,8 @@ class InetAddress implements java.io.Serializable {
                     return inetAddresses;
                 }
                 // else addresses != this
+            } finally {
+                lookupLock.unlock();
             }
             // delegate to different addresses when we are already replaced
             // but outside of synchronized block to avoid any chance of dead-locking
@@ -923,13 +935,13 @@ class InetAddress implements java.io.Serializable {
         public InetAddress[] lookupAllHostAddr(String host)
             throws UnknownHostException
         {
-            return Blocker.run(() -> impl.lookupAllHostAddr(host));
+            return Blocker.runBlocking(() -> impl.lookupAllHostAddr(host));
         }
 
         public String getHostByAddr(byte[] addr)
             throws UnknownHostException
         {
-            return Blocker.run(() -> impl.getHostByAddr(addr));
+            return Blocker.runBlocking(() -> impl.getHostByAddr(addr));
         }
     }
 
@@ -986,7 +998,9 @@ class InetAddress implements java.io.Serializable {
             String hostEntry;
             String host = null;
 
-            try (Scanner hostsFileScanner = new Scanner(new File(hostsFile), "UTF-8")) {
+            try (Scanner hostsFileScanner = new Scanner(new File(hostsFile),
+                                                        UTF_8.INSTANCE))
+            {
                 while (hostsFileScanner.hasNextLine()) {
                     hostEntry = hostsFileScanner.nextLine();
                     if (!hostEntry.startsWith("#")) {
@@ -999,7 +1013,7 @@ class InetAddress implements java.io.Serializable {
                         }
                     }
                 }
-            } catch (FileNotFoundException e) {
+            } catch (IOException e) {
                 throw new UnknownHostException("Unable to resolve address "
                         + Arrays.toString(addr) + " as hosts file " + hostsFile
                         + " not found ");
@@ -1035,7 +1049,9 @@ class InetAddress implements java.io.Serializable {
             ArrayList<InetAddress> inetAddresses = null;
 
             // lookup the file and create a list InetAddress for the specified host
-            try (Scanner hostsFileScanner = new Scanner(new File(hostsFile), "UTF-8")) {
+            try (Scanner hostsFileScanner = new Scanner(new File(hostsFile),
+                                                        UTF_8.INSTANCE))
+            {
                 while (hostsFileScanner.hasNextLine()) {
                     hostEntry = hostsFileScanner.nextLine();
                     if (!hostEntry.startsWith("#")) {
@@ -1054,7 +1070,7 @@ class InetAddress implements java.io.Serializable {
                         }
                     }
                 }
-            } catch (FileNotFoundException e) {
+            } catch (IOException e) {
                 throw new UnknownHostException("Unable to resolve host " + host
                         + " as hosts file " + hostsFile + " not found ");
             }

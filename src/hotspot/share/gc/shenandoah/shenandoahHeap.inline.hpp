@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2015, 2019, Red Hat, Inc. All rights reserved.
+ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
@@ -49,7 +50,7 @@
 
 
 inline ShenandoahHeapRegion* ShenandoahRegionIterator::next() {
-  size_t new_index = Atomic::add((size_t) 1, &_index);
+  size_t new_index = Atomic::add(&_index, (size_t) 1);
   // get_region() provides the bounds-check and returns NULL on OOB.
   return _heap->get_region(new_index - 1);
 }
@@ -130,18 +131,21 @@ inline oop ShenandoahHeap::evac_update_with_forwarded(T* p) {
 }
 
 inline oop ShenandoahHeap::cas_oop(oop n, oop* addr, oop c) {
-  return (oop) Atomic::cmpxchg(n, addr, c);
+  assert(is_aligned(addr, HeapWordSize), "Address should be aligned: " PTR_FORMAT, p2i(addr));
+  return (oop) Atomic::cmpxchg(addr, c, n);
 }
 
 inline oop ShenandoahHeap::cas_oop(oop n, narrowOop* addr, narrowOop c) {
+  assert(is_aligned(addr, sizeof(narrowOop)), "Address should be aligned: " PTR_FORMAT, p2i(addr));
   narrowOop val = CompressedOops::encode(n);
-  return CompressedOops::decode((narrowOop) Atomic::cmpxchg(val, addr, c));
+  return CompressedOops::decode((narrowOop) Atomic::cmpxchg(addr, c, val));
 }
 
 inline oop ShenandoahHeap::cas_oop(oop n, narrowOop* addr, oop c) {
+  assert(is_aligned(addr, sizeof(narrowOop)), "Address should be aligned: " PTR_FORMAT, p2i(addr));
   narrowOop cmp = CompressedOops::encode(c);
   narrowOop val = CompressedOops::encode(n);
-  return CompressedOops::decode((narrowOop) Atomic::cmpxchg(val, addr, cmp));
+  return CompressedOops::decode((narrowOop) Atomic::cmpxchg(addr, cmp, val));
 }
 
 template <class T>
@@ -367,6 +371,14 @@ inline bool ShenandoahHeap::is_full_gc_move_in_progress() const {
 
 inline bool ShenandoahHeap::is_update_refs_in_progress() const {
   return _gc_state.is_set(UPDATEREFS);
+}
+
+inline bool ShenandoahHeap::is_stw_gc_in_progress() const {
+  return is_full_gc_in_progress() || is_degenerated_gc_in_progress();
+}
+
+inline bool ShenandoahHeap::is_concurrent_root_in_progress() const {
+  return _concurrent_root_in_progress.is_set();
 }
 
 template<class T>

@@ -41,12 +41,13 @@
 #include "memory/resourceArea.hpp"
 #include "memory/universe.hpp"
 #include "oops/compiledICHolder.hpp"
+#include "oops/klass.inline.hpp"
 #include "runtime/safepointMechanism.hpp"
 #include "runtime/sharedRuntime.hpp"
 #include "runtime/vframeArray.hpp"
+#include "runtime/vm_version.hpp"
 #include "utilities/align.hpp"
 #include "utilities/formatBuffer.hpp"
-#include "vm_version_x86.hpp"
 #include "vmreg_x86.inline.hpp"
 #ifdef COMPILER1
 #include "c1/c1_Runtime1.hpp"
@@ -2532,8 +2533,8 @@ nmethod* SharedRuntime::generate_native_wrapper(MacroAssembler* masm,
     __ jcc(Assembler::notEqual, slow_path_lock);
 
     // Slow path will re-enter here
-
     __ bind(lock_done);
+    // __ inc_held_monitor_count(r15_thread);
   }
 
 
@@ -2703,7 +2704,7 @@ nmethod* SharedRuntime::generate_native_wrapper(MacroAssembler* masm,
     }
 
     __ bind(done);
-
+    // __ dec_held_monitor_count(r15_thread);
   }
   {
     SkipIfEqual skip(masm, &DTraceMethodProbes, false);

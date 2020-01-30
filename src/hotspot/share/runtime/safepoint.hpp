@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -75,7 +75,6 @@ class SafepointSynchronize : AllStatic {
     SAFEPOINT_CLEANUP_COMPILATION_POLICY,
     SAFEPOINT_CLEANUP_SYMBOL_TABLE_REHASH,
     SAFEPOINT_CLEANUP_STRING_TABLE_REHASH,
-    SAFEPOINT_CLEANUP_CLD_PURGE,
     SAFEPOINT_CLEANUP_SYSTEM_DICTIONARY_RESIZE,
     SAFEPOINT_CLEANUP_REQUEST_OOPSTORAGE_CLEANUP,
     SAFEPOINT_CLEANUP_KEEPALIVES,
@@ -110,7 +109,6 @@ class SafepointSynchronize : AllStatic {
   // JavaThreads that need to block for the safepoint will stop on the
   // _wait_barrier, where they can quickly be started again.
   static WaitBarrier* _wait_barrier;
-  static long         _end_of_last_safepoint;     // Time of last safepoint in milliseconds
   static julong       _coalesced_vmop_count;     // coalesced vmop count
 
   // For debug long safepoint
@@ -165,6 +163,7 @@ public:
   static void handle_polling_page_exception(JavaThread *thread);
 
   static bool is_cleanup_needed();
+  static bool is_forced_cleanup_needed();
   static void do_cleanup_tasks();
 
   static void set_is_at_safepoint()             { _state = _synchronized; }

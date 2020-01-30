@@ -33,6 +33,7 @@
 #include "gc/z/zRootsIterator.hpp"
 #include "gc/z/zStat.hpp"
 #include "gc/z/zTask.hpp"
+#include "gc/z/zThread.inline.hpp"
 #include "gc/z/zThreadLocalAllocBuffer.hpp"
 #include "gc/z/zWorkers.hpp"
 #include "logging/log.hpp"
@@ -53,6 +54,10 @@ public:
 
     // Remap TLAB
     ZThreadLocalAllocBuffer::remap(thread);
+  }
+
+  virtual bool should_disarm_nmethods() const {
+    return true;
   }
 
   virtual void do_oop(oop* p) {

@@ -31,7 +31,6 @@
 #include "jfr/recorder/checkpoint/types/traceid/jfrTraceId.hpp"
 #include "jfr/recorder/checkpoint/types/traceid/jfrTraceIdBits.inline.hpp"
 #include "jfr/recorder/checkpoint/types/traceid/jfrTraceIdEpoch.hpp"
-#include "jfr/recorder/checkpoint/types/traceid/jfrTraceIdMacros.hpp"
 #include "jfr/support/jfrKlassExtension.hpp"
 #include "oops/arrayKlass.hpp"
 #include "oops/klass.hpp"
@@ -40,10 +39,30 @@
 #include "runtime/thread.inline.hpp"
 #include "utilities/debug.hpp"
 
+inline bool is_not_tagged(traceid value) {
+  const traceid this_epoch_bit = JfrTraceIdEpoch::in_use_this_epoch_bit();
+  return (value & ((this_epoch_bit << META_SHIFT) | this_epoch_bit)) != this_epoch_bit;
+}
+
+template <typename T>
+inline bool should_tag(const T* t) {
+  assert(t != NULL, "invariant");
+  return is_not_tagged(TRACE_ID_RAW(t));
+}
+
+template <>
+inline bool should_tag<Method>(const Method* method) {
+  assert(method != NULL, "invariant");
+  return is_not_tagged((traceid)method->trace_flags());
+}
+
 template <typename T>
 inline traceid set_used_and_get(const T* type) {
   assert(type != NULL, "invariant");
-  SET_USED_THIS_EPOCH(type);
+  if (should_tag(type)) {
+    SET_USED_THIS_EPOCH(type);
+    JfrTraceIdEpoch::set_changed_tag_state();
+  }
   assert(USED_THIS_EPOCH(type), "invariant");
   return TRACE_ID(type);
 }
@@ -60,31 +79,36 @@ inline traceid JfrTraceId::get(const Thread* t) {
 
 inline traceid JfrTraceId::use(const Klass* klass) {
   assert(klass != NULL, "invariant");
-  return set_used_and_get(klass);
+  if (should_tag(klass)) {
+    SET_USED_THIS_EPOCH(klass);
+    JfrTraceIdEpoch::set_changed_tag_state();
+  }
+  assert(USED_THIS_EPOCH(klass), "invariant");
+  return get(klass);
 }
 
 inline traceid JfrTraceId::use(const Method* method) {
-  assert(method != NULL, "invariant");
   return use(method->method_holder(), method);
 }
 
 inline traceid JfrTraceId::use(const Klass* klass, const Method* method) {
   assert(klass != NULL, "invariant");
   assert(method != NULL, "invariant");
-  SET_METHOD_FLAG_USED_THIS_EPOCH(method);
-
-  SET_METHOD_AND_CLASS_USED_THIS_EPOCH(klass);
-  assert(METHOD_AND_CLASS_USED_THIS_EPOCH(klass), "invariant");
+  if (METHOD_FLAG_NOT_USED_THIS_EPOCH(method)) {
+    SET_METHOD_AND_CLASS_USED_THIS_EPOCH(klass);
+    SET_METHOD_FLAG_USED_THIS_EPOCH(method);
+    assert(METHOD_AND_CLASS_USED_THIS_EPOCH(klass), "invariant");
+    assert(METHOD_FLAG_USED_THIS_EPOCH(method), "invariant");
+    JfrTraceIdEpoch::set_changed_tag_state();
+  }
   return (METHOD_ID(klass, method));
 }
 
 inline traceid JfrTraceId::use(const ModuleEntry* module) {
-  assert(module != NULL, "invariant");
   return set_used_and_get(module);
 }
 
 inline traceid JfrTraceId::use(const PackageEntry* package) {
-  assert(package != NULL, "invariant");
   return set_used_and_get(package);
 }
 

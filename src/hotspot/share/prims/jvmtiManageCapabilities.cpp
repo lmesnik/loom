@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -271,9 +271,9 @@ jvmtiError JvmtiManageCapabilities::add_capabilities(const jvmtiCapabilities *cu
   // return the result
   either(current, desired, result);
 
-  // special case for Fiber events
+  // special case for virtual thread events
   if (result->can_support_fibers == 1) {
-    java_lang_Fiber::set_notify_jvmti_events(true);
+    java_lang_VirtualThread::set_notify_jvmti_events(true);
   }
 
   update();
@@ -377,6 +377,8 @@ void JvmtiManageCapabilities::update() {
   JvmtiExport::set_can_support_fibers(avail.can_support_fibers);
   JvmtiExport::set_can_support_continuations(avail.can_support_continuations);
   JvmtiExport::set_should_clean_up_heap_objects(avail.can_generate_breakpoint_events);
+  JvmtiExport::set_can_get_owned_monitor_info(avail.can_get_owned_monitor_info ||
+                                              avail.can_get_owned_monitor_stack_depth_info);
 }
 
 #ifndef PRODUCT

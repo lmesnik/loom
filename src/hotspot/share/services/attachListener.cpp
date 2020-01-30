@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -237,19 +237,7 @@ jint dump_heap(AttachOperation* op, outputStream* out) {
     // This helps reduces the amount of unreachable objects in the dump
     // and makes it easier to browse.
     HeapDumper dumper(live_objects_only /* request GC */);
-    int res = dumper.dump(op->arg(0));
-    if (res == 0) {
-      out->print_cr("Heap dump file created");
-    } else {
-      // heap dump failed
-      ResourceMark rm;
-      char* error = dumper.error_as_C_string();
-      if (error == NULL) {
-        out->print_cr("Dump failed - reason unknown");
-      } else {
-        out->print_cr("%s", error);
-      }
-    }
+    dumper.dump(op->arg(0), out);
   }
   return JNI_OK;
 }
@@ -479,7 +467,7 @@ void AttachListener::init() {
     return;
   }
 
-  { MutexLocker mu(Threads_lock);
+  { MutexLocker mu(THREAD, Threads_lock);
     JavaThread* listener_thread = new JavaThread(&attach_listener_thread_entry);
 
     // Check that thread and osthread were created

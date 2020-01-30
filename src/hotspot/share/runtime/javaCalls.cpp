@@ -26,6 +26,7 @@
 #include "classfile/systemDictionary.hpp"
 #include "classfile/vmSymbols.hpp"
 #include "code/nmethod.hpp"
+#include "compiler/compilationPolicy.hpp"
 #include "compiler/compileBroker.hpp"
 #include "interpreter/interpreter.hpp"
 #include "interpreter/linkResolver.hpp"
@@ -33,7 +34,6 @@
 #include "oops/method.inline.hpp"
 #include "oops/oop.inline.hpp"
 #include "prims/jniCheck.hpp"
-#include "runtime/compilationPolicy.hpp"
 #include "runtime/handles.inline.hpp"
 #include "runtime/interfaceSupport.inline.hpp"
 #include "runtime/javaCalls.hpp"
@@ -186,7 +186,7 @@ void JavaCalls::call_virtual(JavaValue* result, Klass* spec_klass, Symbol* name,
   LinkInfo link_info(spec_klass, name, signature);
   LinkResolver::resolve_virtual_call(
           callinfo, receiver, recvrKlass, link_info, true, CHECK);
-  methodHandle method = callinfo.selected_method();
+  methodHandle method(THREAD, callinfo.selected_method());
   assert(method.not_null(), "should have thrown exception");
 
   // Invoke the method
@@ -222,7 +222,7 @@ void JavaCalls::call_special(JavaValue* result, Klass* klass, Symbol* name, Symb
   CallInfo callinfo;
   LinkInfo link_info(klass, name, signature);
   LinkResolver::resolve_special_call(callinfo, args->receiver(), link_info, CHECK);
-  methodHandle method = callinfo.selected_method();
+  methodHandle method(THREAD, callinfo.selected_method());
   assert(method.not_null(), "should have thrown exception");
 
   // Invoke the method
@@ -257,7 +257,7 @@ void JavaCalls::call_static(JavaValue* result, Klass* klass, Symbol* name, Symbo
   CallInfo callinfo;
   LinkInfo link_info(klass, name, signature);
   LinkResolver::resolve_static_call(callinfo, link_info, true, CHECK);
-  methodHandle method = callinfo.selected_method();
+  methodHandle method(THREAD, callinfo.selected_method());
   assert(method.not_null(), "should have thrown exception");
 
   // Invoke the method

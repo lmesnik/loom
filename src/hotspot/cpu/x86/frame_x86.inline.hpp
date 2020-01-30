@@ -29,6 +29,7 @@
 #include "code/codeCache.inline.hpp"
 #include "code/vmreg.inline.hpp"
 #include "compiler/oopMap.inline.hpp"
+#include "interpreter/interpreter.hpp"
 #include "runtime/sharedRuntime.hpp"
 
 // Inline functions for Intel frames:
@@ -409,6 +410,7 @@ frame frame::sender_for_compiled_frame(RegisterMap* map) const {
 
   // This is the saved value of EBP which may or may not really be an FP.
   // It is only an FP if the sender is an interpreter frame (or C1?).
+  // saved_fp_addr should be correct even for a bottom thawed frame (with a return barrier)
   intptr_t** saved_fp_addr = (intptr_t**) (sender_sp - frame::sender_sp_offset);
   intptr_t* sender_fp = *saved_fp_addr;
   if (map->update_map()) {
@@ -423,7 +425,7 @@ frame frame::sender_for_compiled_frame(RegisterMap* map) const {
     } else {
       assert (!_cb->caller_must_gc_arguments(map->thread()), "");
       assert (!map->include_argument_oops(), "");
-      assert (oop_map() == NULL || OopMapStream(oop_map(), OopMapValue::callee_saved_value).is_done(), "callee-saved value in compiled frame");
+      assert (oop_map() == NULL || !oop_map()->has_any(OopMapValue::callee_saved_value), "callee-saved value in compiled frame");
     }
 
     // Since the prolog does the save and restore of EBP there is no oopmap
@@ -438,7 +440,7 @@ frame frame::sender_for_compiled_frame(RegisterMap* map) const {
     if (map->walk_cont()) { // about to walk into an h-stack 	
       return Continuation::top_frame(*this, map);	
     } else {
-      Continuation::fix_continuation_bottom_sender(map, *this, &sender_pc, &sender_sp, &sender_fp);	
+      Continuation::fix_continuation_bottom_sender(map, *this, &sender_pc, &sender_sp);	
     }
   }
 
@@ -447,7 +449,7 @@ frame frame::sender_for_compiled_frame(RegisterMap* map) const {
   if (sender_cb != NULL) {
     return frame(sender_sp, unextended_sp, sender_fp, sender_pc, sender_cb);
   }
-  // tty->print_cr(">>>> NO CB:"); print_on(tty);
+  // tty->print_cr(">>>> NO CB sender_pc: %p", sender_pc); os::print_location(tty, (intptr_t)sender_pc); print_on(tty);
   return frame(sender_sp, unextended_sp, sender_fp, sender_pc);
 }
 

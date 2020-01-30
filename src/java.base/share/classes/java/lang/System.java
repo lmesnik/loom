@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1994, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1994, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,10 +28,9 @@ import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.Console;
 import java.io.FileDescriptor;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.PrintStream;
 import java.io.UnsupportedEncodingException;
 import java.lang.annotation.Annotation;
@@ -95,10 +94,8 @@ import sun.security.util.SecurityConstants;
 public final class System {
     /* Register the natives via the static initializer.
      *
-     * VM will invoke the initializeSystemClass method to complete
-     * the initialization for this class separated from clinit.
-     * Note that to use properties set by the VM, see the constraints
-     * described in the initializeSystemClass method.
+     * The VM will invoke the initPhase1 method to complete the initialization
+     * of this class separate from <clinit>.
      */
     private static native void registerNatives();
     static {
@@ -1926,13 +1923,13 @@ public final class System {
     /**
      * Create PrintStream for stdout/err based on encoding.
      */
-    private static PrintStream newPrintStream(FileOutputStream fos, String enc) {
+    private static PrintStream newPrintStream(OutputStream out, String enc) {
        if (enc != null) {
             try {
-                return new PrintStream(new BufferedOutputStream(fos, 128), true, enc);
+                return new PrintStream(new BufferedOutputStream(out, 128), true, enc);
             } catch (UnsupportedEncodingException uee) {}
         }
-        return new PrintStream(new BufferedOutputStream(fos, 128), true);
+        return new PrintStream(new BufferedOutputStream(out, 128), true);
     }
 
     /**
@@ -2022,12 +2019,12 @@ public final class System {
 
         lineSeparator = props.getProperty("line.separator");
 
-        FileInputStream fdIn = new FileInputStream(FileDescriptor.in);
-        FileOutputStream fdOut = new FileOutputStream(FileDescriptor.out);
-        FileOutputStream fdErr = new FileOutputStream(FileDescriptor.err);
-        setIn0(new BufferedInputStream(fdIn));
-        setOut0(newPrintStream(fdOut, props.getProperty("sun.stdout.encoding")));
-        setErr0(newPrintStream(fdErr, props.getProperty("sun.stderr.encoding")));
+        InputStream in = new sun.nio.ch.ConsoleInputStream(FileDescriptor.in);
+        OutputStream out = new sun.nio.ch.ConsoleOutputStream(FileDescriptor.out);
+        OutputStream err = new sun.nio.ch.ConsoleOutputStream(FileDescriptor.err);
+        setIn0(new BufferedInputStream(in));
+        setOut0(newPrintStream(out, props.getProperty("sun.stdout.encoding")));
+        setErr0(newPrintStream(err, props.getProperty("sun.stderr.encoding")));
 
         // Setup Java signal handlers for HUP, TERM, and INT (where available).
         Terminator.setup();
@@ -2288,63 +2285,38 @@ public final class System {
                 return Thread.currentCarrierThread();
             }
             public <R> R executeOnCarrierThread(Callable<R> task) throws Exception {
-                Thread t = Thread.currentCarrierThread();
-                Fiber<?> f = t.getFiber();
-                if (f != null) t.setFiber(null);
+                Thread carrier = Thread.currentCarrierThread();
+                VirtualThread vthread = carrier.getVirtualThread();
+                if (vthread != null) carrier.setVirtualThread(null);
                 try {
                     return task.call();
                 } finally {
-                    if (f != null) t.setFiber(f);
+                    if (vthread != null) carrier.setVirtualThread(vthread);
                 }
             }
+
             public <T> T getCarrierThreadLocal(ThreadLocal<T> local) {
                 return local.getCarrierThreadLocal();
             }
-            public Fiber<?> getFiber(Thread t) {
-                if (t instanceof ShadowThread) {
-                    return ((ShadowThread) t).fiber();
-                } else {
-                    return null;
-                }
+
+            public <T> void setCarrierThreadLocal(ThreadLocal<T> local, T value) {
+                local.setCarrierThreadLocal(value);
             }
-            public Thread getShadowThread(Fiber<?> f) {
-                return f.shadowThreadOrNull();
+
+            public void parkVirtualThread() {
+                VirtualThread.park();
             }
-            public Object currentStrand() {
-                Thread thread = Thread.currentCarrierThread();
-                Fiber<?> fiber = thread.getFiber();
-                return (fiber != null) ? fiber : thread;
+
+            public void parkVirtualThread(long nanos) {
+                VirtualThread.parkNanos(nanos);
             }
-            public void interrupt(Object strand) {
-                if (strand instanceof Fiber) {
-                    ((Fiber) strand).interrupt();
-                } else {
-                    ((Thread) strand).interrupt();
-                }
+
+            public void unparkVirtualThread(Thread thread) {
+                ((VirtualThread) thread).unpark();
             }
-            public boolean isInterrupted() {
-                Object strand = currentStrand();
-                if (strand instanceof Fiber) {
-                    return ((Fiber) strand).isInterrupted();
-                } else {
-                    return ((Thread) strand).isInterrupted();
-                }
-            }
-            public boolean clearInterrupt() {
-                if (currentStrand() instanceof Fiber) {
-                    return Fiber.clearInterrupt();
-                } else {
-                    return Thread.interrupted();
-                }
-            }
-            public void parkFiber() {
-                Fiber.park();
-            }
-            public void parkFiber(long nanos) {
-                Fiber.parkNanos(nanos);
-            }
-            public void unparkFiber(Fiber<?> fiber) {
-                fiber.unpark();
+
+            public boolean isVirtualThreadParking(Thread thread) {
+                return ((VirtualThread) thread).isParking();
             }
         });
     }

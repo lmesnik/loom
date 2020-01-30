@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -54,6 +54,7 @@ import java.util.function.Supplier;
 import org.graalvm.compiler.api.directives.GraalDirectives;
 import org.graalvm.compiler.api.replacements.SnippetReflectionProvider;
 import org.graalvm.compiler.api.test.Graal;
+import org.graalvm.compiler.api.test.ModuleSupport;
 import org.graalvm.compiler.code.CompilationResult;
 import org.graalvm.compiler.core.CompilationPrinter;
 import org.graalvm.compiler.core.GraalCompiler;
@@ -126,7 +127,6 @@ import org.graalvm.compiler.printer.GraalDebugHandlersFactory;
 import org.graalvm.compiler.runtime.RuntimeProvider;
 import org.graalvm.compiler.test.AddExports;
 import org.graalvm.compiler.test.GraalTest;
-import org.graalvm.compiler.test.ModuleSupport;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.BeforeClass;
@@ -606,11 +606,21 @@ public abstract class GraalCompilerTest extends GraalTest {
         return providers;
     }
 
-    protected HighTierContext getDefaultHighTierContext() {
+    /**
+     * Override the {@link OptimisticOptimizations} settings used for the test. This is called for
+     * all the paths where the value is set so it is the proper place for a test override. Setting
+     * it in other places can result in inconsistent values being used in other parts of the
+     * compiler.
+     */
+    protected OptimisticOptimizations getOptimisticOptimizations() {
+        return OptimisticOptimizations.ALL;
+    }
+
+    protected final HighTierContext getDefaultHighTierContext() {
         return new HighTierContext(getProviders(), getDefaultGraphBuilderSuite(), getOptimisticOptimizations());
     }
 
-    protected MidTierContext getDefaultMidTierContext() {
+    protected final MidTierContext getDefaultMidTierContext() {
         return new MidTierContext(getProviders(), getTargetProvider(), getOptimisticOptimizations(), null);
     }
 
@@ -643,7 +653,7 @@ public abstract class GraalCompilerTest extends GraalTest {
     }
 
     protected final BasePhase<HighTierContext> createInliningPhase() {
-        return createInliningPhase(new CanonicalizerPhase());
+        return createInliningPhase(this.createCanonicalizerPhase());
     }
 
     protected BasePhase<HighTierContext> createInliningPhase(CanonicalizerPhase canonicalizer) {
@@ -1081,10 +1091,6 @@ public abstract class GraalCompilerTest extends GraalTest {
         return compile(installedCodeOwner, graph, new CompilationResult(compilationId), compilationId, options);
     }
 
-    protected OptimisticOptimizations getOptimisticOptimizations() {
-        return OptimisticOptimizations.ALL;
-    }
-
     /**
      * Compiles a given method.
      *
@@ -1115,6 +1121,12 @@ public abstract class GraalCompilerTest extends GraalTest {
 
     protected StructuredGraph getFinalGraph(ResolvedJavaMethod method) {
         StructuredGraph graph = parseForCompile(method);
+        applyFrontEnd(graph);
+        return graph;
+    }
+
+    protected StructuredGraph getFinalGraph(ResolvedJavaMethod method, OptionValues options) {
+        StructuredGraph graph = parseForCompile(method, options);
         applyFrontEnd(graph);
         return graph;
     }
@@ -1514,5 +1526,9 @@ public abstract class GraalCompilerTest extends GraalTest {
      */
     protected boolean isArchitecture(String name) {
         return name.equals(backend.getTarget().arch.getName());
+    }
+
+    protected CanonicalizerPhase createCanonicalizerPhase() {
+        return CanonicalizerPhase.create();
     }
 }

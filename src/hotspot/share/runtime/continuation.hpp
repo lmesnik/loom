@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,7 @@
 #define SHARE_VM_RUNTIME_CONTINUATION_HPP
 
 #include "oops/oopsHierarchy.hpp"
+#include "memory/iterator.hpp"
 #include "runtime/frame.hpp"
 #include "runtime/globals.hpp"
 #include "jni.h"
@@ -83,8 +84,8 @@ public:
   static OopStorage* weak_storage() { return _weak_handles; }
 
   static int freeze(JavaThread* thread, FrameInfo* fi, bool from_interpreter);
-  static int prepare_thaw(FrameInfo* fi, bool return_barrier);
-  static address thaw_leaf(FrameInfo* fi, bool return_barrier, bool exception);
+  static int prepare_thaw(JavaThread* thread, FrameInfo* fi, bool return_barrier);
+  static address thaw_leaf(JavaThread* thread, FrameInfo* fi, bool return_barrier, bool exception);
   static address thaw(JavaThread* thread, FrameInfo* fi, bool return_barrier, bool exception);
   static int try_force_yield(JavaThread* thread, oop cont);
 
@@ -95,9 +96,9 @@ public:
   static bool is_return_barrier_entry(const address pc);
   static bool is_frame_in_continuation(const frame& f, oop cont);
   static bool is_frame_in_continuation(JavaThread* thread, const frame& f);
-  static bool fix_continuation_bottom_sender(JavaThread* thread, const frame& callee, address* sender_pc, intptr_t** sender_sp, intptr_t** sender_fp);
-  static bool fix_continuation_bottom_sender(RegisterMap* map, const frame& callee, address* sender_pc, intptr_t** sender_sp, intptr_t** sender_fp);
-  static frame fix_continuation_bottom_sender(const frame& callee, RegisterMap* map, frame f);
+  static bool fix_continuation_bottom_sender(JavaThread* thread, const frame& callee, address* sender_pc, intptr_t** sender_sp);
+  static bool fix_continuation_bottom_sender(RegisterMap* map, const frame& callee, address* sender_pc, intptr_t** sender_sp);
+  // static frame fix_continuation_bottom_sender(const frame& callee, RegisterMap* map, frame f);
   static address* get_continuation_entry_pc_for_sender(Thread* thread, const frame& f, address* pc_addr);
   static address get_top_return_pc_post_barrier(JavaThread* thread, address pc);
 
@@ -113,11 +114,10 @@ public:
   // access frame data
   static bool is_in_usable_stack(address addr, const RegisterMap* map);
   static int usp_offset_to_index(const frame& fr, const RegisterMap* map, const int usp_offset_in_bytes);
-  static address usp_offset_to_location(const frame& fr, const RegisterMap* map, const int usp_offset_in_bytes);
+  // static address usp_offset_to_location(const frame& fr, const RegisterMap* map, const int usp_offset_in_bytes);
   static address usp_offset_to_location(const frame& fr, const RegisterMap* map, const int usp_offset_in_bytes, bool is_oop);
-  static address reg_to_location(const frame& fr, const RegisterMap* map, VMReg reg);
+  // static address reg_to_location(const frame& fr, const RegisterMap* map, VMReg reg);
   static address reg_to_location(const frame& fr, const RegisterMap* map, VMReg reg, bool is_oop);
-  static address reg_to_location(oop cont, const frame& fr, const RegisterMap* map, VMReg reg, bool is_oop);
   static address interpreter_frame_expression_stack_at(const frame& fr, const RegisterMap* map, const InterpreterOopMap& oop_mask, int index);
   static address interpreter_frame_local_at(const frame& fr, const RegisterMap* map, const InterpreterOopMap& oop_mask, int index);
 
@@ -126,6 +126,7 @@ public:
 
   static oop continuation_scope(oop cont);
   static bool is_scope_bottom(oop cont_scope, const frame& fr, const RegisterMap* map);
+
 
 #ifndef PRODUCT
   static void describe(FrameValues &values);
@@ -137,6 +138,33 @@ private:
   // declared here as it's used in friend declarations
   static address oop_address(objArrayOop ref_stack, int ref_sp, int index);
   static address oop_address(objArrayOop ref_stack, int ref_sp, address stack_address);
+
+  friend class InstanceStackChunkKlass;
+
+public:
+  template <class OopClosureType> static void stack_chunk_iterate_stack(oop obj, OopClosureType* closure);
+  template <class OopClosureType> static void stack_chunk_iterate_stack_bounded(oop obj, OopClosureType* closure, MemRegion mr);
+
+// public:
+//   // for now, we don't devirtualize the closure for faster compilation
+//   static void stack_chunk_iterate_stack(oop obj, OopClosure* closure, bool do_metadata);
+//   static void stack_chunk_iterate_stack_bounded(oop obj, OopClosure* closure, bool do_metadata, MemRegion mr);
+
+private:
+  static void emit_chunk_iterate_event(oop chunk, int num_frames, int num_oops);
+
+#ifdef ASSERT
+public:
+  static bool debug_is_stack_chunk(Klass* klass);
+  static bool debug_is_stack_chunk(oop obj);
+  static bool debug_verify_stack_chunk(oop chunk, oop cont = (oop)NULL, size_t* out_size = NULL, int* out_frames = NULL, int* out_oops = NULL);
+  static void debug_print_stack_chunk(oop obj);
+  static bool debug_is_continuation(Klass* klass);
+  static bool debug_is_continuation(oop obj);
+  static bool debug_verify_continuation(oop cont);
+  static void debug_print_continuation(oop cont, outputStream* st = NULL);
+  static bool debug_is_continuation_run_frame(const frame& f);
+#endif
 };
 
 void CONT_RegisterNativeMethods(JNIEnv *env, jclass cls);

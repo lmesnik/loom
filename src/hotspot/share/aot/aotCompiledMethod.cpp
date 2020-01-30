@@ -32,10 +32,12 @@
 #include "compiler/compilerOracle.hpp"
 #include "gc/shared/cardTableBarrierSet.hpp"
 #include "gc/shared/collectedHeap.hpp"
+#include "oops/klass.inline.hpp"
 #include "oops/method.inline.hpp"
 #include "runtime/frame.inline.hpp"
 #include "runtime/handles.inline.hpp"
 #include "runtime/java.hpp"
+#include "runtime/orderAccess.hpp"
 #include "runtime/os.hpp"
 #include "runtime/safepointVerifiers.hpp"
 #include "runtime/sharedRuntime.hpp"
@@ -155,8 +157,6 @@ void AOTCompiledMethod::do_unloading(bool unloading_occurred) {
 }
 
 bool AOTCompiledMethod::make_not_entrant_helper(int new_state) {
-  // Make sure the method is not flushed in case of a safepoint in code below.
-  methodHandle the_method(method());
   NoSafepointVerifier nsv;
 
   {
@@ -203,10 +203,7 @@ bool AOTCompiledMethod::make_not_entrant_helper(int new_state) {
 bool AOTCompiledMethod::make_entrant() {
   assert(!method()->is_old(), "reviving evolved method!");
 
-  // Make sure the method is not flushed in case of a safepoint in code below.
-  methodHandle the_method(method());
   NoSafepointVerifier nsv;
-
   {
     // Enter critical section.  Does not block for safepoint.
     MutexLocker pl(CompiledMethod_lock, Mutex::_no_safepoint_check_flag);

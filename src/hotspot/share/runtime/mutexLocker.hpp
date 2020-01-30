@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -68,6 +68,7 @@ extern Monitor* CGC_lock;                        // used for coordination betwee
                                                  // fore- & background GC threads.
 extern Monitor* STS_lock;                        // used for joining/leaving SuspendibleThreadSet.
 extern Monitor* FullGCCount_lock;                // in support of "concurrent" full gc
+extern Monitor* G1OldGCCount_lock;               // in support of "concurrent" full gc
 extern Monitor* DirtyCardQ_CBL_mon;              // Protects dirty card Q
                                                  // completed buffer queue.
 extern Mutex*   Shared_DirtyCardQ_lock;          // Lock protecting dirty card
@@ -103,7 +104,6 @@ extern Mutex*   Debug3_lock;
 extern Mutex*   RawMonitor_lock;
 extern Mutex*   PerfDataMemAlloc_lock;           // a lock on the allocator for PerfData memory for performance data
 extern Mutex*   PerfDataManager_lock;            // a long on access to PerfDataManager resources
-extern Mutex*   ParkerFreeList_lock;
 extern Mutex*   OopMapCacheAlloc_lock;           // protects allocation of oop_map caches
 
 extern Mutex*   FreeList_lock;                   // protects the free region list during safepoints
@@ -112,8 +112,10 @@ extern Monitor* RootRegionScan_lock;             // used to notify that the CM t
 
 extern Mutex*   Management_lock;                 // a lock used to serialize JVM management
 extern Monitor* Service_lock;                    // a lock used for service thread operation
+extern Monitor* Notification_lock;               // a lock used for notification thread operation
 extern Monitor* PeriodicTask_lock;               // protects the periodic task structure
 extern Monitor* RedefineClasses_lock;            // locks classes from parallel redefinition
+extern Mutex*   Verify_lock;                     // synchronize initialization of verify library
 extern Monitor* ThreadsSMRDelete_lock;           // Used by ThreadsSMRSupport to take pressure off the Threads_lock
 extern Mutex*   ThreadIdTableCreate_lock;        // Used by ThreadIdTable to lazily create the thread id table
 extern Mutex*   SharedDecoder_lock;              // serializes access to the decoder during normal (not error reporting) use
@@ -172,15 +174,17 @@ void print_owned_locks_on_error(outputStream* st);
 
 char *lock_name(Mutex *mutex);
 
-// for debugging: check that we're already owning this lock (or are at a safepoint)
+// for debugging: check that we're already owning this lock (or are at a safepoint / handshake)
 #ifdef ASSERT
 void assert_locked_or_safepoint(const Mutex* lock);
 void assert_locked_or_safepoint_weak(const Mutex* lock);
 void assert_lock_strong(const Mutex* lock);
+void assert_locked_or_safepoint_or_handshake(const Mutex* lock, const JavaThread* thread);
 #else
 #define assert_locked_or_safepoint(lock)
 #define assert_locked_or_safepoint_weak(lock)
 #define assert_lock_strong(lock)
+#define assert_locked_or_safepoint_or_handshake(lock, thread)
 #endif
 
 class MutexLocker: public StackObj {
@@ -202,7 +206,7 @@ class MutexLocker: public StackObj {
     }
   }
 
-  MutexLocker(Mutex* mutex, Thread* thread, Mutex::SafepointCheckFlag flag = Mutex::_safepoint_check_flag) :
+  MutexLocker(Thread* thread, Mutex* mutex, Mutex::SafepointCheckFlag flag = Mutex::_safepoint_check_flag) :
     _mutex(mutex) {
     bool no_safepoint_check = flag == Mutex::_no_safepoint_check_flag;
     if (_mutex != NULL) {
@@ -238,8 +242,8 @@ class MonitorLocker: public MutexLocker {
     assert(_monitor != NULL, "NULL monitor not allowed");
   }
 
-  MonitorLocker(Monitor* monitor, Thread* thread, Mutex::SafepointCheckFlag flag = Mutex::_safepoint_check_flag) :
-    MutexLocker(monitor, thread, flag), _flag(flag), _monitor(monitor)  {
+  MonitorLocker(Thread* thread, Monitor* monitor, Mutex::SafepointCheckFlag flag = Mutex::_safepoint_check_flag) :
+    MutexLocker(thread, monitor, flag), _flag(flag), _monitor(monitor)  {
     // Superclass constructor did locking
     assert(_monitor != NULL, "NULL monitor not allowed");
   }

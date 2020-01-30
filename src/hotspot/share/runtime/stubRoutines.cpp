@@ -100,6 +100,11 @@ address StubRoutines::_jlong_disjoint_arraycopy          = CAST_FROM_FN_PTR(addr
 address StubRoutines::_oop_disjoint_arraycopy            = CAST_FROM_FN_PTR(address, StubRoutines::oop_copy);
 address StubRoutines::_oop_disjoint_arraycopy_uninit     = CAST_FROM_FN_PTR(address, StubRoutines::oop_copy_uninit);
 
+address StubRoutines::_word_memcpy_up              = NULL; // CAST_FROM_FN_PTR(address, StubRoutines::jint_copy);
+address StubRoutines::_word_memcpy_down            = NULL; // CAST_FROM_FN_PTR(address, StubRoutines::jint_copy);
+address StubRoutines::_word_memcpy_up_nt           = NULL; // CAST_FROM_FN_PTR(address, StubRoutines::jint_copy);
+address StubRoutines::_word_memcpy_down_nt         = NULL; // CAST_FROM_FN_PTR(address, StubRoutines::jint_copy);
+
 address StubRoutines::_arrayof_jbyte_arraycopy  = CAST_FROM_FN_PTR(address, StubRoutines::arrayof_jbyte_copy);
 address StubRoutines::_arrayof_jshort_arraycopy = CAST_FROM_FN_PTR(address, StubRoutines::arrayof_jshort_copy);
 address StubRoutines::_arrayof_jint_arraycopy   = CAST_FROM_FN_PTR(address, StubRoutines::arrayof_jint_copy);
@@ -159,6 +164,8 @@ address StubRoutines::_squareToLen = NULL;
 address StubRoutines::_mulAdd = NULL;
 address StubRoutines::_montgomeryMultiply = NULL;
 address StubRoutines::_montgomerySquare = NULL;
+address StubRoutines::_bigIntegerRightShiftWorker = NULL;
+address StubRoutines::_bigIntegerLeftShiftWorker = NULL;
 
 address StubRoutines::_vectorizedMismatch = NULL;
 

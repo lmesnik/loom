@@ -68,6 +68,7 @@ RegisterMap::RegisterMap(JavaThread *thread, bool update_map, bool walk_cont, bo
   debug_only(_update_for_id = NULL;)
 
   _on_hstack = false;
+  _in_chunk = false;
   _last_vstack_fp = NULL;
   if (walk_cont) {
     // we allocate the handle now (rather than in set_cont) because sometimes (StackWalker) the handle must live across HandleMarks
@@ -97,6 +98,7 @@ RegisterMap::RegisterMap(const RegisterMap* map) {
 
   _cont = map->_cont;
   _on_hstack = map->_on_hstack;
+  _in_chunk = map->_in_chunk;
   _last_vstack_fp = map->_last_vstack_fp;
 
   pd_initialize_from(map);
@@ -118,9 +120,11 @@ RegisterMap::RegisterMap(const RegisterMap* map) {
   }
 }
 
-void RegisterMap::set_in_cont(bool on_hstack) {
+void RegisterMap::set_in_cont(bool on_hstack, bool in_chunk) {
    assert (_walk_cont, ""); 
-   _on_hstack = on_hstack;
+   assert (!in_chunk || on_hstack, "");
+   _on_hstack = (int)on_hstack;
+   _in_chunk = (int)in_chunk;
    if (!on_hstack)
     _last_vstack_fp = NULL;
 }
@@ -675,12 +679,12 @@ void frame::print_on_error(outputStream* st, char* buf, int buflen, bool verbose
     } else if (StubRoutines::contains(pc())) {
       StubCodeDesc* desc = StubCodeDesc::desc_for(pc());
       if (desc != NULL) {
-        st->print("v  ~StubRoutines::%s", desc->name());
+        st->print("v  ~StubRoutines::%s " PTR_FORMAT, desc->name(), p2i(pc()));
       } else {
         st->print("v  ~StubRoutines::" PTR_FORMAT, p2i(pc()));
       }
     } else if (_cb->is_buffer_blob()) {
-      st->print("v  ~BufferBlob::%s", ((BufferBlob *)_cb)->name());
+      st->print("v  ~BufferBlob::%s " PTR_FORMAT, ((BufferBlob *)_cb)->name(), p2i(pc()));
     } else if (_cb->is_compiled()) {
       CompiledMethod* cm = (CompiledMethod*)_cb;
       Method* m = cm->method();
@@ -718,21 +722,21 @@ void frame::print_on_error(outputStream* st, char* buf, int buflen, bool verbose
         st->print("J  " PTR_FORMAT, p2i(pc()));
       }
     } else if (_cb->is_runtime_stub()) {
-      st->print("v  ~RuntimeStub::%s", ((RuntimeStub *)_cb)->name());
+      st->print("v  ~RuntimeStub::%s " PTR_FORMAT, ((RuntimeStub *)_cb)->name(), p2i(pc()));
     } else if (_cb->is_deoptimization_stub()) {
-      st->print("v  ~DeoptimizationBlob");
+      st->print("v  ~DeoptimizationBlob " PTR_FORMAT, p2i(pc()));
     } else if (_cb->is_exception_stub()) {
-      st->print("v  ~ExceptionBlob");
+      st->print("v  ~ExceptionBlob " PTR_FORMAT, p2i(pc()));
     } else if (_cb->is_safepoint_stub()) {
-      st->print("v  ~SafepointBlob");
+      st->print("v  ~SafepointBlob " PTR_FORMAT, p2i(pc()));
     } else if (_cb->is_adapter_blob()) {
-      st->print("v  ~AdapterBlob");
+      st->print("v  ~AdapterBlob " PTR_FORMAT, p2i(pc()));
     } else if (_cb->is_vtable_blob()) {
-      st->print("v  ~VtableBlob");
+      st->print("v  ~VtableBlob " PTR_FORMAT, p2i(pc()));
     } else if (_cb->is_method_handles_adapter_blob()) {
-      st->print("v  ~MethodHandlesAdapterBlob");
+      st->print("v  ~MethodHandlesAdapterBlob " PTR_FORMAT, p2i(pc()));
     } else if (_cb->is_uncommon_trap_stub()) {
-      st->print("v  ~UncommonTrapBlob");
+      st->print("v  ~UncommonTrapBlob " PTR_FORMAT, p2i(pc()));
     } else {
       st->print("v  blob " PTR_FORMAT, p2i(pc()));
     }
@@ -1302,7 +1306,7 @@ void frame::describe(FrameValues& values, int frame_no, const RegisterMap* reg_m
                     FormatBuffer<1024>("#%d method %s @ %d", frame_no, m->name_and_sig_as_C_string(), bci), 3);
     values.describe(-1, info_address,
                     err_msg("- %d locals %d max stack", m->max_locals(), m->max_stack()), 2);
-    values.describe(frame_no, (intptr_t*)sender_pc_addr(), "return address");
+    values.describe(frame_no, (intptr_t*)sender_pc_addr(), Continuation::is_return_barrier_entry(*sender_pc_addr()) ? "return address (return barrier)" : "return address");
 
     if (m->max_locals() > 0) {
       intptr_t* l0 = interpreter_frame_local_at(0);
@@ -1315,9 +1319,14 @@ void frame::describe(FrameValues& values, int frame_no, const RegisterMap* reg_m
       }
     }
 
+    if (interpreter_frame_monitor_begin() != interpreter_frame_monitor_end()) {
+      values.describe(frame_no, (intptr_t*)interpreter_frame_monitor_begin(), "monitors begin");
+      values.describe(frame_no, (intptr_t*)interpreter_frame_monitor_end(), "monitors end");
+    }
+
     // Compute the actual expression stack size
     InterpreterOopMap mask;
-    OopMapCache::compute_one_oop_map(m, bci, &mask);
+    OopMapCache::compute_one_oop_map(methodHandle(Thread::current(), m), bci, &mask);
     intptr_t* tos = NULL;
     // Report each stack element and mark as owned by this frame
     for (int e = 0; e < mask.expression_stack_size(); e++) {
@@ -1327,10 +1336,6 @@ void frame::describe(FrameValues& values, int frame_no, const RegisterMap* reg_m
     }
     if (tos != NULL) {
       values.describe(-1, tos, err_msg("expression stack for #%d", frame_no), 2);
-    }
-    if (interpreter_frame_monitor_begin() != interpreter_frame_monitor_end()) {
-      values.describe(frame_no, (intptr_t*)interpreter_frame_monitor_begin(), "monitors begin");
-      values.describe(frame_no, (intptr_t*)interpreter_frame_monitor_end(), "monitors end");
     }
 
     if (reg_map != NULL) {
@@ -1383,6 +1388,7 @@ void frame::describe(FrameValues& values, int frame_no, const RegisterMap* reg_m
         assert(t == sig_bt[sig_index], "sigs in sync");
         VMReg fst = regs[sig_index].first();
         if (fst->is_stack()) {
+          assert (((int)fst->reg2stack()) >= 0, "reg2stack: %lu | %d", fst->reg2stack(), (int)fst->reg2stack());
           int offset = fst->reg2stack() * VMRegImpl::stack_slot_size + stack_slot_offset;
           intptr_t* stack_address = (intptr_t*)((address)sp() + offset);
           if (at_this)
@@ -1428,8 +1434,8 @@ void frame::describe(FrameValues& values, int frame_no, const RegisterMap* reg_m
 
       if (oop_map() != NULL) {
         FrameValuesOopMapClosure valuesFn(this, reg_map, values, frame_no);
-        int mask = OopMapValue::callee_saved_value; // | OopMapValue::live_value;
-        oop_map()->all_do(this, mask, &valuesFn);
+        // also OopMapValue::live_value ??
+        oop_map()->all_type_do(this, OopMapValue::callee_saved_value, &valuesFn);
       }
     }
   } else if (is_native_frame()) {

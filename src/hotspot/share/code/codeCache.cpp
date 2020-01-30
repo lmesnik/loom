@@ -33,7 +33,9 @@
 #include "code/icBuffer.hpp"
 #include "code/nmethod.hpp"
 #include "code/pcDesc.hpp"
+#include "compiler/compilationPolicy.hpp"
 #include "compiler/compileBroker.hpp"
+#include "gc/shared/barrierSetNMethod.hpp"
 #include "jfr/jfrEvents.hpp"
 #include "logging/log.hpp"
 #include "logging/logStream.hpp"
@@ -46,7 +48,7 @@
 #include "oops/oop.inline.hpp"
 #include "oops/verifyOopClosure.hpp"
 #include "runtime/arguments.hpp"
-#include "runtime/compilationPolicy.hpp"
+#include "runtime/atomic.hpp"
 #include "runtime/deoptimization.hpp"
 #include "runtime/handles.inline.hpp"
 #include "runtime/icache.hpp"
@@ -769,7 +771,7 @@ void CodeCache::release_exception_cache(ExceptionCache* entry) {
     for (;;) {
       ExceptionCache* purge_list_head = Atomic::load(&_exception_cache_purge_list);
       entry->set_purge_list_next(purge_list_head);
-      if (Atomic::cmpxchg(entry, &_exception_cache_purge_list, purge_list_head) == purge_list_head) {
+      if (Atomic::cmpxchg(&_exception_cache_purge_list, purge_list_head, entry) == purge_list_head) {
         break;
       }
     }
@@ -789,6 +791,7 @@ void CodeCache::purge_exception_caches() {
 }
 
 uint8_t CodeCache::_unloading_cycle = 1;
+uint64_t CodeCache::_marking_cycle = 0;
 
 void CodeCache::increment_unloading_cycle() {
   // 2-bit value (see IsUnloadingState in nmethod.cpp for details)
@@ -797,6 +800,12 @@ void CodeCache::increment_unloading_cycle() {
   if (_unloading_cycle == 0) {
     _unloading_cycle = 1;
   }
+}
+
+void CodeCache::increment_marking_cycle() {
+  ++_marking_cycle;
+  BarrierSetNMethod* bs_nm = BarrierSet::barrier_set()->barrier_set_nmethod();
+  bs_nm->arm_all_nmethods();
 }
 
 CodeCache::UnloadingScope::UnloadingScope(BoolObjectClosure* is_alive)

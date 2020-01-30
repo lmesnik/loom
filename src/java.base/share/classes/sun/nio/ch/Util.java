@@ -39,6 +39,7 @@ import java.util.Set;
 
 import jdk.internal.access.JavaLangAccess;
 import jdk.internal.access.SharedSecrets;
+import jdk.internal.access.foreign.MemorySegmentProxy;
 import jdk.internal.misc.TerminatingThreadLocal;
 import jdk.internal.misc.Unsafe;
 import sun.security.action.GetPropertyAction;
@@ -77,8 +78,7 @@ public class Util {
      * for potential future-proofing.
      */
     private static long getMaxCachedBufferSize() {
-        String s = GetPropertyAction
-                .privilegedGetProperty("jdk.nio.maxCachedBufferSize");
+        String s = GetPropertyAction.privilegedGetProperty("jdk.nio.maxCachedBufferSize");
         if (s != null) {
             try {
                 long m = Long.parseLong(s);
@@ -419,7 +419,7 @@ public class Util {
                                              long.class,
                                              FileDescriptor.class,
                                              Runnable.class,
-                                             boolean.class });
+                                             boolean.class, MemorySegmentProxy.class});
                         ctor.setAccessible(true);
                         directByteBufferConstructor = ctor;
                     } catch (ClassNotFoundException   |
@@ -446,7 +446,7 @@ public class Util {
                              addr,
                              fd,
                              unmapper,
-                             isSync});
+                             isSync, null});
         } catch (InstantiationException |
                  IllegalAccessException |
                  InvocationTargetException e) {
@@ -467,7 +467,7 @@ public class Util {
                                              long.class,
                                              FileDescriptor.class,
                                              Runnable.class,
-                                             boolean.class });
+                                             boolean.class, MemorySegmentProxy.class });
                         ctor.setAccessible(true);
                         directByteBufferRConstructor = ctor;
                     } catch (ClassNotFoundException |
@@ -494,7 +494,7 @@ public class Util {
                              addr,
                              fd,
                              unmapper,
-                             isSync});
+                             isSync, null});
         } catch (InstantiationException |
                  IllegalAccessException |
                  InvocationTargetException e) {

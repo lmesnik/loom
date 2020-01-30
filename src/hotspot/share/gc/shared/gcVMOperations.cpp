@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -151,8 +151,7 @@ void VM_GC_HeapInspection::doit() {
       log_warning(gc)("GC locker is held; pre-dump GC was skipped");
     }
   }
-  HeapInspection inspect(_csv_format, _print_help, _print_class_stats,
-                         _columns);
+  HeapInspection inspect;
   inspect.heap_inspection(_out);
 }
 
@@ -192,13 +191,6 @@ VM_CollectForMetadataAllocation::VM_CollectForMetadataAllocation(ClassLoaderData
 
 // Returns true iff concurrent GCs unloads metadata.
 bool VM_CollectForMetadataAllocation::initiate_concurrent_GC() {
-#if INCLUDE_CMSGC
-  if (UseConcMarkSweepGC && CMSClassUnloadingEnabled) {
-    MetaspaceGC::set_should_concurrent_collect(true);
-    return true;
-  }
-#endif
-
 #if INCLUDE_G1GC
   if (UseG1GC && ClassUnloadingWithConcurrentMark) {
     G1CollectedHeap* g1h = G1CollectedHeap::heap();
@@ -238,13 +230,13 @@ void VM_CollectForMetadataAllocation::doit() {
   }
 
   if (initiate_concurrent_GC()) {
-    // For CMS and G1 expand since the collection is going to be concurrent.
+    // For G1 expand since the collection is going to be concurrent.
     _result = _loader_data->metaspace_non_null()->expand_and_allocate(_size, _mdtype);
     if (_result != NULL) {
       return;
     }
 
-    log_debug(gc)("%s full GC for Metaspace", UseConcMarkSweepGC ? "CMS" : "G1");
+    log_debug(gc)("G1 full GC for Metaspace");
   }
 
   // Don't clear the soft refs yet.
@@ -274,6 +266,30 @@ void VM_CollectForMetadataAllocation::doit() {
   }
 
   log_debug(gc)("After Metaspace GC failed to allocate size " SIZE_FORMAT, _size);
+
+  if (GCLocker::is_active_and_needs_gc()) {
+    set_gc_locked();
+  }
+}
+
+VM_CollectForCodeCacheAllocation::VM_CollectForCodeCacheAllocation(uint gc_count_before,
+                                                                   uint full_gc_count_before,
+                                                                   GCCause::Cause gc_cause)
+    : VM_GC_Operation(gc_count_before, gc_cause, full_gc_count_before, true) {
+}
+
+void VM_CollectForCodeCacheAllocation::doit() {
+  SvcGCMarker sgcm(SvcGCMarker::FULL);
+
+  CollectedHeap* heap = Universe::heap();
+  GCCauseSetter gccs(heap, _gc_cause);
+
+  log_debug(gc)("Full GC for CodeCache");
+
+  // Don't clear the soft refs yet.
+  heap->collect_as_vm_thread(GCCause::_metadata_GC_threshold);
+
+  log_debug(gc)("After GC for CodeCache");
 
   if (GCLocker::is_active_and_needs_gc()) {
     set_gc_locked();

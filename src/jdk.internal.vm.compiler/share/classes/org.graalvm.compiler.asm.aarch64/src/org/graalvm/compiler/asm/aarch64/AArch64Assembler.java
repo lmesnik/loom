@@ -471,6 +471,7 @@ public abstract class AArch64Assembler extends Assembler {
     private static final int AddSubExtendedOp = 0x0B200000;
 
     private static final int MulOp = 0x1B000000;
+    private static final int SignedMulLongOp = 0x9B200000;
     private static final int DataProcessing1SourceOp = 0x5AC00000;
     private static final int DataProcessing2SourceOp = 0x1AC00000;
 
@@ -1301,13 +1302,23 @@ public abstract class AArch64Assembler extends Assembler {
     }
 
     /**
+     * Insert ldp/stp at the specified position.
+     */
+    protected void insertLdpStp(int size, Instruction instr, Register rt, Register rt2, Register base, int offset, int position) {
+        InstructionType type = generalFromSize(size);
+        int scaledOffset = maskField(7, offset);
+        int memop = type.encoding | instr.encoding | scaledOffset << LoadStorePairImm7Offset | rt2(rt2) | rn(base) | rt(rt);
+        emitInt(memop | LoadStorePairOp | (0b010 << 23), position);
+    }
+
+    /**
      * Load Pair of Registers calculates an address from a base register value and an immediate
      * offset, and stores two 32-bit words or two 64-bit doublewords to the calculated address, from
      * two registers.
      */
     public void ldp(int size, Register rt, Register rt2, AArch64Address address) {
         assert size == 32 || size == 64;
-        loadStorePairInstruction(LDP, rt, rt2, address, generalFromSize(size));
+        loadStorePairInstruction(size, LDP, rt, rt2, address);
     }
 
     /**
@@ -1317,15 +1328,24 @@ public abstract class AArch64Assembler extends Assembler {
      */
     public void stp(int size, Register rt, Register rt2, AArch64Address address) {
         assert size == 32 || size == 64;
-        loadStorePairInstruction(STP, rt, rt2, address, generalFromSize(size));
+        loadStorePairInstruction(size, STP, rt, rt2, address);
     }
 
-    private void loadStorePairInstruction(Instruction instr, Register rt, Register rt2, AArch64Address address, InstructionType type) {
-        int scaledOffset = maskField(7, address.getImmediateRaw());  // LDP/STP use a 7-bit scaled
-                                                                     // offset
+    private void loadStorePairInstruction(int size, Instruction instr, Register rt, Register rt2, AArch64Address address) {
+        InstructionType type = generalFromSize(size);
+        // LDP/STP uses a 7-bit scaled offset
+        int offset = address.getImmediateRaw();
+        if (address.getAddressingMode() == AddressingMode.IMMEDIATE_UNSCALED) {
+            int sizeInBytes = size / Byte.SIZE;
+            long mask = sizeInBytes - 1;
+            assert (offset & mask) == 0 : "LDP/STP only supports aligned offset.";
+            offset = offset / sizeInBytes;
+        }
+        int scaledOffset = maskField(7, offset);
         int memop = type.encoding | instr.encoding | scaledOffset << LoadStorePairImm7Offset | rt2(rt2) | rn(address.getBase()) | rt(rt);
         switch (address.getAddressingMode()) {
             case IMMEDIATE_SCALED:
+            case IMMEDIATE_UNSCALED:
                 emitInt(memop | LoadStorePairOp | (0b010 << 23));
                 break;
             case IMMEDIATE_POST_INDEXED:
@@ -2313,7 +2333,7 @@ public abstract class AArch64Assembler extends Assembler {
     }
 
     /**
-     * unsigned multiply high. dst = (src1 * src2)[127:64]
+     * Unsigned multiply high. dst = (src1 * src2)[127:64]
      *
      * @param dst general purpose register. May not be null or the stackpointer.
      * @param src1 general purpose register. May not be null or the stackpointer.
@@ -2327,7 +2347,7 @@ public abstract class AArch64Assembler extends Assembler {
     }
 
     /**
-     * unsigned multiply add-long. xDst = xSrc3 + (wSrc1 * wSrc2)
+     * Unsigned multiply add-long. xDst = xSrc3 + (wSrc1 * wSrc2)
      *
      * @param dst general purpose register. May not be null or the stackpointer.
      * @param src1 general purpose register. May not be null or the stackpointer.
@@ -2343,7 +2363,7 @@ public abstract class AArch64Assembler extends Assembler {
     }
 
     /**
-     * signed multiply add-long. xDst = xSrc3 + (wSrc1 * wSrc2)
+     * Signed multiply-add long. xDst = xSrc3 + (wSrc1 * wSrc2)
      *
      * @param dst general purpose register. May not be null or the stackpointer.
      * @param src1 general purpose register. May not be null or the stackpointer.
@@ -2351,11 +2371,19 @@ public abstract class AArch64Assembler extends Assembler {
      * @param src3 general purpose register. May not be null or the stackpointer.
      */
     public void smaddl(Register dst, Register src1, Register src2, Register src3) {
-        assert !dst.equals(sp);
-        assert !src1.equals(sp);
-        assert !src2.equals(sp);
-        assert !src3.equals(sp);
-        emitInt(0b10011011001 << 21 | dst.encoding | rs1(src1) | rs2(src2) | rs3(src3));
+        smullInstruction(MADD, dst, src1, src2, src3);
+    }
+
+    /**
+     * Signed multiply-sub long. xDst = xSrc3 - (wSrc1 * wSrc2)
+     *
+     * @param dst general purpose register. May not be null or the stackpointer.
+     * @param src1 general purpose register. May not be null or the stackpointer.
+     * @param src2 general purpose register. May not be null or the stackpointer.
+     * @param src3 general purpose register. May not be null or the stackpointer.
+     */
+    public void smsubl(Register dst, Register src1, Register src2, Register src3) {
+        smullInstruction(MSUB, dst, src1, src2, src3);
     }
 
     private void mulInstruction(Instruction instr, Register dst, Register src1, Register src2, Register src3, InstructionType type) {
@@ -2364,6 +2392,14 @@ public abstract class AArch64Assembler extends Assembler {
         assert !src2.equals(sp);
         assert !src3.equals(sp);
         emitInt(type.encoding | instr.encoding | MulOp | rd(dst) | rs1(src1) | rs2(src2) | rs3(src3));
+    }
+
+    private void smullInstruction(Instruction instr, Register dst, Register src1, Register src2, Register src3) {
+        assert !dst.equals(sp);
+        assert !src1.equals(sp);
+        assert !src2.equals(sp);
+        assert !src3.equals(sp);
+        emitInt(instr.encoding | SignedMulLongOp | rd(dst) | rs1(src1) | rs2(src2) | rs3(src3));
     }
 
     /**

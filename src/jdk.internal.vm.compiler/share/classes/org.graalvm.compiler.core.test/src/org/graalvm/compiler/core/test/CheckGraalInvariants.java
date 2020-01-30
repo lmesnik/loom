@@ -78,7 +78,7 @@ import org.graalvm.compiler.phases.util.Providers;
 import org.graalvm.compiler.runtime.RuntimeProvider;
 import org.graalvm.compiler.serviceprovider.JavaVersionUtil;
 import org.graalvm.compiler.test.AddExports;
-import org.graalvm.compiler.test.ModuleSupport;
+import org.graalvm.compiler.api.test.ModuleSupport;
 import jdk.internal.vm.compiler.word.LocationIdentity;
 import org.junit.Assert;
 import org.junit.Assume;
@@ -189,6 +189,13 @@ public class CheckGraalInvariants extends GraalCompilerTest {
 
         public boolean shouldVerifyFoldableMethods() {
             return true;
+        }
+
+        /**
+         * Makes edits to the list of verifiers to be run.
+         */
+        @SuppressWarnings("unused")
+        protected void updateVerifiers(List<VerifyPhase<CoreProviders>> verifiers) {
         }
     }
 
@@ -303,6 +310,8 @@ public class CheckGraalInvariants extends GraalCompilerTest {
         if (tool.shouldVerifyFoldableMethods()) {
             verifiers.add(foldableMethodsVerifier);
         }
+
+        tool.updateVerifiers(verifiers);
 
         for (Method m : BadUsageWithEquals.class.getDeclaredMethods()) {
             ResolvedJavaMethod method = metaAccess.lookupJavaMethod(m);
@@ -432,6 +441,16 @@ public class CheckGraalInvariants extends GraalCompilerTest {
             try {
                 Class<?> c = Class.forName(className, true, CheckGraalInvariants.class.getClassLoader());
                 classes.add(c);
+            } catch (UnsupportedClassVersionError e) {
+                // graal-test.jar can contain classes compiled for different Java versions
+            } catch (NoClassDefFoundError e) {
+                if (!e.getMessage().contains("Could not initialize class")) {
+                    throw e;
+                } else {
+                    // A second or later attempt to initialize a class
+                    // results in this confusing error where the
+                    // original cause of initialization failure is lost
+                }
             } catch (Throwable t) {
                 tool.handleClassLoadingException(t);
             }

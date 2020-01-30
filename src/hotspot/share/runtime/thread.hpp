@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -49,6 +49,7 @@
 #include "runtime/unhandledOops.hpp"
 #include "utilities/align.hpp"
 #include "utilities/exceptions.hpp"
+#include "utilities/globalDefinitions.hpp"
 #include "utilities/macros.hpp"
 #ifdef ZERO
 # include "stack_zero.hpp"
@@ -63,6 +64,7 @@ class ThreadSafepointState;
 class ThreadsList;
 class ThreadsSMRSupport;
 
+class JvmtiRawMonitor;
 class JvmtiThreadState;
 class ThreadStatistics;
 class ConcurrentLocksDump;
@@ -146,6 +148,22 @@ class Thread: public ThreadShadow {
   static THREAD_LOCAL Thread* _thr_current;
 #endif
 
+  int _nmethod_disarm_value;
+
+ public:
+  int nmethod_disarm_value() {
+    return _nmethod_disarm_value;
+  }
+
+  void set_nmethod_disarm_value(int value) {
+    _nmethod_disarm_value = value;
+  }
+
+  static ByteSize nmethod_disarmed_offset() {
+    return byte_offset_of(Thread, _nmethod_disarm_value);
+  }
+
+ private:
   // Thread local data area available to the GC. The internal
   // structure and contents of this data area is GC-specific.
   // Only GC and GC barrier code should access this data area.
@@ -405,6 +423,9 @@ class Thread: public ThreadShadow {
   ObjectMonitor* _current_pending_monitor;      // ObjectMonitor this thread
                                                 // is waiting to lock
   bool _current_pending_monitor_is_from_java;   // locking is from Java code
+  JvmtiRawMonitor* _current_pending_raw_monitor; // JvmtiRawMonitor this thread
+                                                 // is waiting to lock
+
 
   // ObjectMonitor on which this thread called Object.wait()
   ObjectMonitor* _current_waiting_monitor;
@@ -477,6 +498,7 @@ class Thread: public ThreadShadow {
   virtual bool is_Java_thread()     const            { return false; }
   virtual bool is_Compiler_thread() const            { return false; }
   virtual bool is_Code_cache_sweeper_thread() const  { return false; }
+  virtual bool is_service_thread() const             { return false; }
   virtual bool is_hidden_from_external_view() const  { return false; }
   virtual bool is_jvmti_agent_thread() const         { return false; }
   // True iff the thread can perform GC operations at a safepoint.
@@ -641,6 +663,14 @@ class Thread: public ThreadShadow {
     _current_waiting_monitor = monitor;
   }
 
+  // For tracking the Jvmti raw monitor the thread is pending on.
+  JvmtiRawMonitor* current_pending_raw_monitor() {
+    return _current_pending_raw_monitor;
+  }
+  void set_current_pending_raw_monitor(JvmtiRawMonitor* monitor) {
+    _current_pending_raw_monitor = monitor;
+  }
+
   // GC support
   // Apply "f->do_oop" to all root oops in "this".
   //   Used by JavaThread::oops_do.
@@ -718,7 +748,7 @@ protected:
 
   bool    on_local_stack(address adr) const {
     // QQQ this has knowledge of direction, ought to be a stack method
-    return (_stack_base >= adr && adr >= stack_end());
+    return (_stack_base > adr && adr >= stack_end());
   }
 
   int     lgrp_id() const        { return _lgrp_id; }
@@ -787,7 +817,7 @@ protected:
  public:
   volatile intptr_t _Stalled;
   volatile int _TypeTag;
-  ParkEvent * _ParkEvent;                     // for synchronized()
+  ParkEvent * _ParkEvent;                     // for Object monitors and JVMTI raw monitors
   ParkEvent * _MuxEvent;                      // for low-level muxAcquire-muxRelease
   int NativeSyncRecursion;                    // diagnostic
 
@@ -863,9 +893,7 @@ class NonJavaThread::Iterator : public StackObj {
   uint _protect_enter;
   NonJavaThread* _current;
 
-  // Noncopyable.
-  Iterator(const Iterator&);
-  Iterator& operator=(const Iterator&);
+  NONCOPYABLE(Iterator);
 
 public:
   Iterator();
@@ -1098,7 +1126,6 @@ class JavaThread: public Thread {
   volatile JNIAttachStates _jni_attach_state;
 
  public:
-  DEBUG_ONLY(oopDesc* _continuation;)
 
   // State of the stack guard pages for this thread.
   enum StackGuardState {
@@ -1193,6 +1220,10 @@ class JavaThread: public Thread {
   bool _cont_preempt;
   FrameInfo _cont_frame;
   int _cont_fastpath;
+  int _held_monitor_count; // used by continuations for fast lock detection
+public:
+  oopDesc* _continuation; // a hack used to make continuation thaw a bit faster; see prepare_thaw
+private:
 
   friend class VMThread;
   friend class ThreadWaitTransition;
@@ -1319,13 +1350,18 @@ class JavaThread: public Thread {
   bool cont_preempt() { return _cont_preempt; }
   void set_cont_preempt(bool x) { _cont_preempt = x; }
   FrameInfo* cont_frame() { return &_cont_frame; }
+  int held_monitor_count() { return _held_monitor_count; }
+  void reset_held_monitor_count() { _held_monitor_count = 0; }
+  void inc_held_monitor_count() { _held_monitor_count++; }
+  void dec_held_monitor_count() { /* assert (_held_monitor_count > 0, ""); -- TODO LOOM: currently this does not hold because we don't handle nesting well */ 
+                                  _held_monitor_count--; }
 
  private:
   // Support for thread handshake operations
   HandshakeState _handshake;
  public:
   void set_handshake_operation(HandshakeOperation* op) {
-    _handshake.set_operation(this, op);
+    _handshake.set_operation(op);
   }
 
   bool has_handshake() const {
@@ -1333,12 +1369,18 @@ class JavaThread: public Thread {
   }
 
   void handshake_process_by_self() {
-    _handshake.process_by_self(this);
+    _handshake.process_by_self();
   }
 
-  void handshake_process_by_vmthread() {
-    _handshake.process_by_vmthread(this);
+  bool handshake_try_process(HandshakeOperation* op) {
+    return _handshake.try_process(op);
   }
+
+#ifdef ASSERT
+  Thread* get_active_handshaker() const {
+    return _handshake.get_active_handshaker();
+  }
+#endif
 
   // Suspend/resume support for JavaThread
  private:
@@ -1791,6 +1833,7 @@ class JavaThread: public Thread {
   static ByteSize cont_fastpath_offset()      { return byte_offset_of(JavaThread, _cont_fastpath); }
   static ByteSize cont_frame_offset()         { return byte_offset_of(JavaThread, _cont_frame); }
   static ByteSize cont_preempt_offset()       { return byte_offset_of(JavaThread, _cont_preempt); }
+  static ByteSize held_monitor_count_offset() { return byte_offset_of(JavaThread, _held_monitor_count); }
 
   // Returns the jni environment for this thread
   JNIEnv* jni_environment()                      { return &_jni_environment; }
@@ -2302,13 +2345,6 @@ class Threads: AllStatic {
   static void deoptimized_wrt_marked_nmethods();
 
   struct Test;                  // For private gtest access.
-};
-
-
-// Thread iterator
-class ThreadClosure: public StackObj {
- public:
-  virtual void do_thread(Thread* thread) = 0;
 };
 
 class SignalHandlerMark: public StackObj {

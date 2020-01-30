@@ -53,7 +53,7 @@ inline void ZReentrantLock::lock() {
 
   if (owner != thread) {
     _lock.lock();
-    Atomic::store(thread, &_owner);
+    Atomic::store(&_owner, thread);
   }
 
   _count++;
@@ -66,7 +66,7 @@ inline void ZReentrantLock::unlock() {
   _count--;
 
   if (_count == 0) {
-    Atomic::store((Thread*)NULL, &_owner);
+    Atomic::store(&_owner, (Thread*)NULL);
     _lock.unlock();
   }
 }
@@ -80,12 +80,16 @@ inline bool ZReentrantLock::is_owned() const {
 template <typename T>
 inline ZLocker<T>::ZLocker(T* lock) :
     _lock(lock) {
-  _lock->lock();
+  if (_lock != NULL) {
+    _lock->lock();
+  }
 }
 
 template <typename T>
 inline ZLocker<T>::~ZLocker() {
-  _lock->unlock();
+  if (_lock != NULL) {
+    _lock->unlock();
+  }
 }
 
 #endif // SHARE_GC_Z_ZLOCK_INLINE_HPP

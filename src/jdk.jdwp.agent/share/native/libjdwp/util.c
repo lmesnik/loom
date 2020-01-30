@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -184,7 +184,6 @@ util_initialize(JNIEnv *env)
         jclass localClassLoaderClass;
         jclass localStringClass;
         jclass localSystemClass;
-        jclass localInnocuousThreadClass;
         jclass localPropertiesClass;
         jclass localVMSupportClass;
         jobject localAgentProperties;
@@ -193,19 +192,16 @@ util_initialize(JNIEnv *env)
         jthreadGroup *groups;
         jthreadGroup localSystemThreadGroup;
 
-        gdata->ignoreEvents = JNI_FALSE;
-
         /* Find some standard classes */
 
         localClassClass         = findClass(env,"java/lang/Class");
-        localFiberClass         = findClass(env,"java/lang/Fiber");
+        localFiberClass         = findClass(env,"java/lang/VirtualThread");
         localThreadClass        = findClass(env,"java/lang/Thread");
         localThreadGroupClass   = findClass(env,"java/lang/ThreadGroup");
         localClassLoaderClass   = findClass(env,"java/lang/ClassLoader");
         localStringClass        = findClass(env,"java/lang/String");
         localSystemClass        = findClass(env,"java/lang/System");
         localPropertiesClass    = findClass(env,"java/util/Properties");
-        localInnocuousThreadClass = findClass(env, "jdk/internal/misc/InnocuousThread");
 
         /* Save references */
 
@@ -216,14 +212,9 @@ util_initialize(JNIEnv *env)
         saveGlobalRef(env, localClassLoaderClass, &(gdata->classLoaderClass));
         saveGlobalRef(env, localStringClass,      &(gdata->stringClass));
         saveGlobalRef(env, localSystemClass,      &(gdata->systemClass));
-        saveGlobalRef(env, localInnocuousThreadClass, &(gdata->innocuousThreadClass));
 
         /* Find some standard methods */
 
-        gdata->fiberToString =
-                getMethod(env, gdata->fiberClass, "toString", "()Ljava/lang/String;");
-        gdata->fiberTryMountAndSuspend =
-                getMethod(env, gdata->fiberClass, "tryMountAndSuspend", "()Ljava/lang/Thread;");
         gdata->threadConstructor =
                 getMethod(env, gdata->threadClass,
                     "<init>", "(Ljava/lang/ThreadGroup;Ljava/lang/String;)V");
@@ -865,10 +856,7 @@ getThreadFiber(jthread thread)
     }
     error = JVMTI_FUNC_PTR(gdata->jvmti,GetThreadFiber)
         (gdata->jvmti, thread, &fiber);
-    if (error == JVMTI_ERROR_THREAD_NOT_ALIVE) {
-        /* fiber fixme: get rid of this once we get rid of helperThreads. It should never happen then. */
-        return NULL;
-    } else if ( error != JVMTI_ERROR_NONE ) {
+    if ( error != JVMTI_ERROR_NONE ) {
         EXIT_ERROR(error,"Error calling GetThreadFiber()");
         return JNI_FALSE;
     }
@@ -892,7 +880,7 @@ getFiberThread(jthread fiber)
         (gdata->jvmti, fiber, &thread);
     if ( error != JVMTI_ERROR_NONE ) {
         EXIT_ERROR(error,"Error calling GetFiberThread()");
-        return JNI_FALSE;
+        return NULL;
     }
     return thread;
 }

@@ -50,7 +50,6 @@ public:
 
   // Oop fields (and metadata) iterators
   //
-  // The InstanceClassLoaderKlass iterators also visit the CLD pointer (or mirror of anonymous klasses.)
 
   // Forward iteration
   // Iterate over the oop fields and metadata.
@@ -66,6 +65,16 @@ public:
   // Iterate over the oop fields and metadata.
   template <typename T, class OopClosureType>
   inline void oop_oop_iterate_bounded(oop obj, OopClosureType* closure, MemRegion mr);
+
+ private:
+
+  // Iterate over the stack.
+  template <typename T, class OopClosureType>
+  inline void oop_oop_iterate_stack(oop obj, OopClosureType* closure);
+
+  // Iterate over the stack.
+  template <typename T, class OopClosureType>
+  inline void oop_oop_iterate_stack_bounded(oop obj, OopClosureType* closure, MemRegion mr);
 };
 
 #endif // SHARE_OOPS_INSTANCECLASSLOADERKLASS_HPP

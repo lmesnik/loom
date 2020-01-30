@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2015, 2019, Red Hat, Inc. All rights reserved.
+ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
@@ -383,7 +384,7 @@ void ShenandoahBarrierC2Support::verify(RootNode* root) {
             (!verify_helper(in1, phis, visited, ShenandoahValue, trace, barriers_used) ||
              !verify_helper(in2, phis, visited, ShenandoahValue, trace, barriers_used))) {
           phis.clear();
-          visited.Reset();
+          visited.reset();
         }
       }
     } else if (n->is_LoadStore()) {
@@ -635,7 +636,7 @@ void ShenandoahBarrierC2Support::verify(RootNode* root) {
         for (uint i = sfpt->jvms()->scloff(); i < sfpt->jvms()->endoff(); i++) {
           if (!verify_helper(sfpt->in(i), phis, visited, ShenandoahLoad, trace, barriers_used)) {
             phis.clear();
-            visited.Reset();
+            visited.reset();
           }
         }
       }
@@ -668,6 +669,17 @@ bool ShenandoahBarrierC2Support::is_dominator_same_ctrl(Node* c, Node* d, Node* 
     if (m->is_Phi() && m->in(0)->is_Loop()) {
       assert(phase->ctrl_or_self(m->in(LoopNode::EntryControl)) != c, "following loop entry should lead to new control");
     } else {
+      if (m->is_Store() || m->is_LoadStore()) {
+        // Take anti-dependencies into account
+        Node* mem = m->in(MemNode::Memory);
+        for (DUIterator_Fast imax, i = mem->fast_outs(imax); i < imax; i++) {
+          Node* u = mem->fast_out(i);
+          if (u->is_Load() && phase->C->can_alias(m->adr_type(), phase->C->get_alias_index(u->adr_type())) &&
+              phase->ctrl_or_self(u) == c) {
+            wq.push(u);
+          }
+        }
+      }
       for (uint i = 0; i < m->req(); i++) {
         if (m->in(i) != NULL && phase->ctrl_or_self(m->in(i)) == c) {
           wq.push(m->in(i));
@@ -1018,7 +1030,7 @@ void ShenandoahBarrierC2Support::in_cset_fast_test(Node*& ctrl, Node*& not_cset_
 
 void ShenandoahBarrierC2Support::call_lrb_stub(Node*& ctrl, Node*& val, Node* load_addr, Node*& result_mem, Node* raw_mem, bool is_native, PhaseIdealLoop* phase) {
   IdealLoopTree*loop = phase->get_loop(ctrl);
-  const TypePtr* obj_type = phase->igvn().type(val)->is_oopptr()->cast_to_nonconst();
+  const TypePtr* obj_type = phase->igvn().type(val)->is_oopptr();
 
   // The slow path stub consumes and produces raw memory in addition
   // to the existing memory edges
@@ -1028,12 +1040,12 @@ void ShenandoahBarrierC2Support::call_lrb_stub(Node*& ctrl, Node*& val, Node* lo
   phase->register_new_node(mm, ctrl);
 
   address target = LP64_ONLY(UseCompressedOops) NOT_LP64(false) ?
-          CAST_FROM_FN_PTR(address, ShenandoahRuntime::load_reference_barrier_fixup_narrow) :
-          CAST_FROM_FN_PTR(address, ShenandoahRuntime::load_reference_barrier_fixup);
+          CAST_FROM_FN_PTR(address, ShenandoahRuntime::load_reference_barrier_narrow) :
+          CAST_FROM_FN_PTR(address, ShenandoahRuntime::load_reference_barrier);
 
   address calladdr = is_native ? CAST_FROM_FN_PTR(address, ShenandoahRuntime::load_reference_barrier_native)
                                : target;
-  const char* name = is_native ? "oop_load_from_native_barrier" : "load_reference_barrier";
+  const char* name = is_native ? "load_reference_barrier_native" : "load_reference_barrier";
   Node* call = new CallLeafNode(ShenandoahBarrierSetC2::shenandoah_load_reference_barrier_Type(), calladdr, name, TypeRawPtr::BOTTOM);
 
   call->init_req(TypeFunc::Control, ctrl);
@@ -1272,6 +1284,38 @@ void ShenandoahBarrierC2Support::pin_and_expand(PhaseIdealLoop* phase) {
     }
     if ((ctrl->is_Proj() && ctrl->in(0)->is_CallJava()) || ctrl->is_CallJava()) {
       CallNode* call = ctrl->is_Proj() ? ctrl->in(0)->as_CallJava() : ctrl->as_CallJava();
+      if (call->entry_point() == OptoRuntime::rethrow_stub()) {
+        // The rethrow call may have too many projections to be
+        // properly handled here. Given there's no reason for a
+        // barrier to depend on the call, move it above the call
+        stack.push(lrb, 0);
+        do {
+          Node* n = stack.node();
+          uint idx = stack.index();
+          if (idx < n->req()) {
+            Node* in = n->in(idx);
+            stack.set_index(idx+1);
+            if (in != NULL) {
+              if (phase->has_ctrl(in)) {
+                if (phase->is_dominator(call, phase->get_ctrl(in))) {
+#ifdef ASSERT
+                  for (uint i = 0; i < stack.size(); i++) {
+                    assert(stack.node_at(i) != in, "node shouldn't have been seen yet");
+                  }
+#endif
+                  stack.push(in, 0);
+                }
+              } else {
+                assert(phase->is_dominator(in, call->in(0)), "no dependency on the call");
+              }
+            }
+          } else {
+            phase->set_ctrl(n, call->in(0));
+            stack.pop();
+          }
+        } while(stack.size() > 0);
+        continue;
+      }
       CallProjections projs;
       call->extract_projections(&projs, false, false);
 
@@ -2106,7 +2150,7 @@ const Type* ShenandoahEnqueueBarrierNode::bottom_type() const {
   if (t == TypePtr::NULL_PTR) {
     return t;
   }
-  return t->is_oopptr()->cast_to_nonconst();
+  return t->is_oopptr();
 }
 
 const Type* ShenandoahEnqueueBarrierNode::Value(PhaseGVN* phase) const {
@@ -2120,7 +2164,7 @@ const Type* ShenandoahEnqueueBarrierNode::Value(PhaseGVN* phase) const {
   if (t == TypePtr::NULL_PTR) {
     return t;
   }
-  return t->is_oopptr()->cast_to_nonconst();
+  return t->is_oopptr();
 }
 
 int ShenandoahEnqueueBarrierNode::needed(Node* n) {
@@ -2336,7 +2380,7 @@ void MemoryGraphFixer::collect_memory_nodes() {
   // Iterate over CFG nodes in rpo and propagate memory state to
   // compute memory state at regions, creating new phis if needed.
   Node_List rpo_list;
-  visited.Clear();
+  visited.clear();
   _phase->rpo(_phase->C->root(), stack, visited, rpo_list);
   Node* root = rpo_list.pop();
   assert(root == _phase->C->root(), "");
@@ -2721,6 +2765,20 @@ void MemoryGraphFixer::fix_mem(Node* ctrl, Node* new_ctrl, Node* mem, Node* mem_
   MergeMemNode* mm = NULL;
   int alias = _alias;
   DEBUG_ONLY(if (trace) { tty->print("ZZZ raw mem is"); mem->dump(); });
+  // Process loads first to not miss an anti-dependency: if the memory
+  // edge of a store is updated before a load is processed then an
+  // anti-dependency may be missed.
+  for (DUIterator i = mem->outs(); mem->has_out(i); i++) {
+    Node* u = mem->out(i);
+    if (u->_idx < last && u->is_Load() && _phase->C->get_alias_index(u->adr_type()) == alias) {
+      Node* m = find_mem(_phase->get_ctrl(u), u);
+      if (m != mem) {
+        DEBUG_ONLY(if (trace) { tty->print("ZZZ setting memory of use"); u->dump(); });
+        _phase->igvn().replace_input_of(u, MemNode::Memory, m);
+        --i;
+      }
+    }
+  }
   for (DUIterator i = mem->outs(); mem->has_out(i); i++) {
     Node* u = mem->out(i);
     if (u->_idx < last) {
@@ -3047,7 +3105,7 @@ const Type* ShenandoahLoadReferenceBarrierNode::Value(PhaseGVN* phase) const {
     return t2;
   }
 
-  const Type* type = t2->is_oopptr()/*->cast_to_nonconst()*/;
+  const Type* type = t2->is_oopptr();
   return type;
 }
 

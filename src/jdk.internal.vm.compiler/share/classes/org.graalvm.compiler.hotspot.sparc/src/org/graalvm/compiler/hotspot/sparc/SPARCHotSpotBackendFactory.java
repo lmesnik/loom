@@ -87,6 +87,7 @@ public class SPARCHotSpotBackendFactory extends HotSpotBackendFactory {
     public HotSpotBackend createBackend(HotSpotGraalRuntimeProvider runtime, CompilerConfiguration compilerConfiguration, HotSpotJVMCIRuntime jvmciRuntime, HotSpotBackend host) {
         assert host == null;
 
+        OptionValues options = runtime.getOptions();
         GraalHotSpotVMConfig config = runtime.getVMConfig();
         JVMCIBackend jvmci = jvmciRuntime.getHostJVMCIBackend();
         HotSpotRegistersProvider registers = createRegisters();
@@ -100,18 +101,19 @@ public class SPARCHotSpotBackendFactory extends HotSpotBackendFactory {
         HotSpotForeignCallsProvider foreignCalls = new SPARCHotSpotForeignCallsProvider(jvmciRuntime, runtime, metaAccess, codeCache, wordTypes, nativeABICallerSaveRegisters);
         LoweringProvider lowerer = createLowerer(runtime, metaAccess, foreignCalls, registers, constantReflection, target);
         HotSpotStampProvider stampProvider = createStampProvider();
-        HotSpotGCProvider gc = createGCProvider(config);
+        HotSpotGCProvider gc = createGCProvider(config, metaAccess);
         Providers p = new Providers(metaAccess, codeCache, constantReflection, constantFieldProvider, foreignCalls, lowerer, null, stampProvider, gc);
         HotSpotSnippetReflectionProvider snippetReflection = createSnippetReflection(runtime, constantReflection, wordTypes);
         BytecodeProvider bytecodeProvider = createBytecodeProvider(metaAccess, snippetReflection);
         HotSpotReplacementsImpl replacements = createReplacements(target, p, snippetReflection, bytecodeProvider);
         Plugins plugins = createGraphBuilderPlugins(runtime, compilerConfiguration, config, metaAccess, constantReflection, foreignCalls, snippetReflection, replacements, wordTypes,
-                        runtime.getOptions());
+                        runtime.getOptions(), target);
         replacements.setGraphBuilderPlugins(plugins);
         HotSpotSuitesProvider suites = createSuites(config, runtime, compilerConfiguration, plugins, replacements);
         HotSpotProviders providers = new HotSpotProviders(metaAccess, codeCache, constantReflection, constantFieldProvider, foreignCalls, lowerer, replacements, suites, registers,
                         snippetReflection, wordTypes, plugins, gc);
         replacements.setProviders(providers);
+        replacements.maybeInitializeEncoder(options);
 
         return createBackend(config, runtime, providers);
     }
@@ -125,7 +127,8 @@ public class SPARCHotSpotBackendFactory extends HotSpotBackendFactory {
                     HotSpotSnippetReflectionProvider snippetReflection,
                     HotSpotReplacementsImpl replacements,
                     HotSpotWordTypes wordTypes,
-                    OptionValues options) {
+                    OptionValues options,
+                    TargetDescription target) {
         Plugins plugins = HotSpotGraphBuilderPlugins.create(
                         graalRuntime,
                         compilerConfiguration,
@@ -136,8 +139,9 @@ public class SPARCHotSpotBackendFactory extends HotSpotBackendFactory {
                         snippetReflection,
                         foreignCalls,
                         replacements,
-                        options);
-        SPARCGraphBuilderPlugins.register(plugins, replacements.getDefaultReplacementBytecodeProvider(), false);
+                        options,
+                        target);
+        SPARCGraphBuilderPlugins.register(plugins, replacements, false);
         return plugins;
     }
 

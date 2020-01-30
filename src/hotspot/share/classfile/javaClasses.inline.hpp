@@ -183,6 +183,12 @@ inline oop java_lang_Continuation::yieldInfo(oop ref) {
 inline void java_lang_Continuation::set_yieldInfo(oop ref, oop value) {
   ref->obj_field_put(_yieldInfo_offset, value);
 }
+inline oop java_lang_Continuation::tail(oop ref) {
+  return ref->obj_field(_tail_offset);
+}
+inline void java_lang_Continuation::set_tail(oop ref, oop value) {
+  ref->obj_field_put(_tail_offset, value);
+}
 inline typeArrayOop java_lang_Continuation::stack(oop ref) {
   oop a = ref->obj_field(_stack_offset);
   return (typeArrayOop)a;
@@ -209,10 +215,10 @@ inline jint java_lang_Continuation::sp(oop ref) {
 inline void java_lang_Continuation::set_sp(oop ref, const jint i) {
   ref->int_field_put(_sp_offset, i);
 }
-inline void* java_lang_Continuation::pc(oop ref) {
-  return (void*)ref->long_field(_pc_offset);
+inline address java_lang_Continuation::pc(oop ref) {
+  return (address)ref->long_field(_pc_offset);
 }
-inline void java_lang_Continuation::set_pc(oop ref, const void* pc) {
+inline void java_lang_Continuation::set_pc(oop ref, const address pc) {
   ref->long_field_put(_pc_offset, (jlong)pc);
 }
 inline jint java_lang_Continuation::refSP(oop ref) {
@@ -282,6 +288,72 @@ inline HeapWord* java_lang_Continuation::refStack_base(oop ref) {
   return refStack(ref)->base();
 }
 
+inline bool java_lang_Continuation::done(oop ref) {
+  return ref->bool_field(_done_offset);
+}
+
+inline oop jdk_internal_misc_StackChunk::parent(oop ref) {
+  return ref->obj_field(_parent_offset);
+}
+inline void jdk_internal_misc_StackChunk::set_parent(oop ref, oop value) {
+  ref->obj_field_put(_parent_offset, value);
+}
+
+template<typename P>
+inline bool jdk_internal_misc_StackChunk::is_parent_null(oop ref) {
+  return (oop)RawAccess<>::oop_load((P*)ref->field_addr_raw(_parent_offset)) == NULL;
+}
+
+template<typename P>
+inline void jdk_internal_misc_StackChunk::set_parent_raw(oop ref, oop value) {
+  RawAccess<IS_DEST_UNINITIALIZED>::oop_store((P*)ref->field_addr_raw(_parent_offset), value);
+}
+inline int jdk_internal_misc_StackChunk::size(oop ref) {
+  return ref->int_field(_size_offset);
+}
+inline void jdk_internal_misc_StackChunk::set_size(HeapWord* ref, int value) {
+  *(jint*)((oop)ref)->field_addr_raw(_size_offset) = value; // ref->int_field_put(_size_offset, value);
+}
+inline int jdk_internal_misc_StackChunk::sp(oop ref) {
+  return ref->int_field(_sp_offset);
+}
+inline void jdk_internal_misc_StackChunk::set_sp(oop ref, int value) {
+  ref->int_field_put(_sp_offset, value);
+}
+inline address jdk_internal_misc_StackChunk::pc(oop ref) {
+  return (address)ref->long_field(_pc_offset);
+}
+inline void jdk_internal_misc_StackChunk::set_pc(oop ref, address value) {
+  ref->long_field_put(_pc_offset, (jlong)value);
+}
+inline int jdk_internal_misc_StackChunk::argsize(oop ref) {
+  return ref->int_field(_argsize_offset);
+}
+inline void jdk_internal_misc_StackChunk::set_argsize(oop ref, int value) {
+  ref->int_field_put(_argsize_offset, value);
+}
+inline bool jdk_internal_misc_StackChunk::gc_mode(oop ref) {
+  return (bool)ref->bool_field(_mode_offset);
+}
+inline void jdk_internal_misc_StackChunk::set_gc_mode(oop ref, bool value) {
+  ref->bool_field_put(_mode_offset, (jboolean)value);
+}
+inline int jdk_internal_misc_StackChunk::end(oop ref) {
+  return size(ref) - argsize(ref);
+}
+inline int jdk_internal_misc_StackChunk::numFrames(oop ref) {
+  return ref->int_field(_numFrames_offset);
+}
+inline void jdk_internal_misc_StackChunk::set_numFrames(oop ref, int value) {
+  ref->int_field_put(_numFrames_offset, value);
+}
+inline int jdk_internal_misc_StackChunk::numOops(oop ref) {
+  return ref->int_field(_numOops_offset);
+}
+inline void jdk_internal_misc_StackChunk::set_numOops(oop ref, int value) {
+  ref->int_field_put(_numOops_offset, value);
+}
+
 inline void java_lang_invoke_CallSite::set_target_volatile(oop site, oop target) {
   site->obj_field_put_volatile(_target_offset, target);
 }
@@ -295,6 +367,14 @@ inline void java_lang_invoke_CallSite::set_target(oop site, oop target) {
 }
 
 inline bool java_lang_invoke_CallSite::is_instance(oop obj) {
+  return obj != NULL && is_subclass(obj->klass());
+}
+
+inline jboolean java_lang_invoke_ConstantCallSite::is_frozen(oop site) {
+  return site->bool_field(_is_frozen_offset);
+}
+
+inline bool java_lang_invoke_ConstantCallSite::is_instance(oop obj) {
   return obj != NULL && is_subclass(obj->klass());
 }
 
@@ -383,7 +463,7 @@ inline int Backtrace::cpref_at(unsigned int merged) {
   return extract_low_short_from_int(merged);
 }
 
-inline int Backtrace::get_line_number(const methodHandle& method, int bci) {
+inline int Backtrace::get_line_number(Method* method, int bci) {
   int line_number = 0;
   if (method->is_native()) {
     // Negative value different from -1 below, enabling Java code in

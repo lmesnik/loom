@@ -30,8 +30,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
-import java.lang.invoke.MethodHandles;
-import java.lang.invoke.VarHandle;
+import java.lang.ref.Cleaner.Cleanable;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ProtocolFamily;
@@ -51,9 +50,9 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 
+import jdk.internal.misc.VirtualThreads;
 import jdk.internal.ref.CleanerFactory;
 import jdk.internal.access.SharedSecrets;
-import jdk.internal.misc.Strands;
 import sun.net.ConnectionResetException;
 import sun.net.NetHooks;
 import sun.net.PlatformSocketImpl;
@@ -70,12 +69,12 @@ import static java.util.concurrent.TimeUnit.NANOSECONDS;
  * This implementation attempts to be compatible with legacy PlainSocketImpl,
  * including behavior and exceptions that are not specified by SocketImpl.
  *
- * The underlying socket used by this SocketImpl is initially configured
- * blocking. If a connect, accept or read is attempted with a timeout, or a
- * fiber invokes a blocking operation, then the socket is changed to non-blocking
+ * The underlying socket used by this SocketImpl is initially configured blocking.
+ * If a connect, accept or read is attempted with a timeout, or a virtual
+ * thread invokes a blocking operation, then the socket is changed to non-blocking
  * When in non-blocking mode, operations that don't complete immediately will
- * poll the socket (or park the fiber when invoked on a fiber) and preserve the
- * semantics of blocking operations.
+ * poll the socket (or park when invoked on a virtual thread) and preserve
+ * the semantics of blocking operations.
  */
 
 public final class NioSocketImpl extends SocketImpl implements PlatformSocketImpl {
@@ -106,7 +105,7 @@ public final class NioSocketImpl extends SocketImpl implements PlatformSocketImp
 
     // set by SocketImpl.create, protected by stateLock
     private boolean stream;
-    private FileDescriptorCloser closer;
+    private Cleanable cleaner;
 
     // set to true when the socket is in non-blocking mode
     private volatile boolean nonBlocking;
@@ -167,29 +166,29 @@ public final class NioSocketImpl extends SocketImpl implements PlatformSocketImp
     }
 
     /**
-     * Disables the current thread or fiber for scheduling purposes until the
+     * Disables the current thread for scheduling purposes until the
      * socket is ready for I/O or is asynchronously closed, for up to the
      * specified waiting time.
-     * @throws IOException if an I/O error occurs or the fiber is interrupted
+     * @throws IOException if an I/O error occurs
      */
     private void park(FileDescriptor fd, int event, long nanos) throws IOException {
-        Object strand = Strands.currentStrand();
-        if (PollerProvider.available() && (strand instanceof Fiber)) {
+        Thread t = Thread.currentThread();
+        if (t.isVirtual()) {
             int fdVal = fdVal(fd);
-            Poller.register(strand, fdVal, event);
+            Poller.register(fdVal, event);
             if (isOpen()) {
                 try {
                     if (nanos == 0) {
-                        Strands.parkFiber();
+                        VirtualThreads.park();
                     } else {
-                        Strands.parkFiber(nanos);
+                        VirtualThreads.park(nanos);
                     }
                     // throw SocketException with interrupt status set for now
-                    if (Strands.isInterrupted()) {
+                    if (t.isInterrupted()) {
                         throw new SocketException("I/O operation interrupted");
                     }
                 } finally {
-                    Poller.deregister(strand, fdVal, event);
+                    Poller.deregister(fdVal, event);
                 }
             }
         } else {
@@ -206,22 +205,22 @@ public final class NioSocketImpl extends SocketImpl implements PlatformSocketImp
     /**
      * Disables the current thread for scheduling purposes until the socket is
      * ready for I/O or is asynchronously closed.
-     * @throws IOException if an I/O error occurs or the fiber is interrupted
+     * @throws IOException if an I/O error occurs
      */
     private void park(FileDescriptor fd, int event) throws IOException {
         park(fd, event, 0);
     }
 
     /**
-     * Ensures that the socket is configured non-blocking when the current
-     * strand is a fiber or the operation has a timeout
+     * Ensures that the socket is configured non-blocking invoked on a virtual
+     * thread or the operation has a timeout
      * @throws IOException if there is an I/O error changing the blocking mode
      */
     private void configureNonBlockingIfNeeded(FileDescriptor fd, boolean timed)
         throws IOException
     {
         if (!nonBlocking
-            && (timed || Strands.currentStrand() instanceof Fiber)) {
+            && (timed || Thread.currentThread().isVirtual())) {
             assert readLock.isHeldByCurrentThread() || writeLock.isHeldByCurrentThread();
             IOUtil.configureBlocking(fd, false);
             nonBlocking = true;
@@ -477,9 +476,10 @@ public final class NioSocketImpl extends SocketImpl implements PlatformSocketImp
                     ResourceManager.afterUdpClose();
                 throw ioe;
             }
+            Runnable closer = closerFor(fd, stream);
             this.fd = fd;
             this.stream = stream;
-            this.closer = FileDescriptorCloser.create(this);
+            this.cleaner = CleanerFactory.cleaner().register(this, closer);
             this.state = ST_UNCONNECTED;
         }
     }
@@ -772,10 +772,11 @@ public final class NioSocketImpl extends SocketImpl implements PlatformSocketImp
         }
 
         // set the fields
+        Runnable closer = closerFor(newfd, true);
         synchronized (nsi.stateLock) {
             nsi.fd = newfd;
             nsi.stream = true;
-            nsi.closer = FileDescriptorCloser.create(nsi);
+            nsi.cleaner = CleanerFactory.cleaner().register(nsi, closer);
             nsi.localport = localAddress.getPort();
             nsi.address = isaa[0].getAddress();
             nsi.port = isaa[0].getPort();
@@ -845,7 +846,7 @@ public final class NioSocketImpl extends SocketImpl implements PlatformSocketImp
         assert Thread.holdsLock(stateLock) && state == ST_CLOSING;
         if (readerThread == 0 && writerThread == 0) {
             try {
-                closer.run();
+                cleaner.clean();
             } catch (UncheckedIOException ioe) {
                 throw ioe.getCause();
             } finally {
@@ -900,7 +901,8 @@ public final class NioSocketImpl extends SocketImpl implements PlatformSocketImp
             if (!tryClose()) {
                 long reader = readerThread;
                 long writer = writerThread;
-                if (NativeThread.isFiber(reader) || NativeThread.isFiber(writer))
+                if (NativeThread.isVirtualThread(reader)
+                        || NativeThread.isVirtualThread(writer))
                     Poller.stopPoll(fdVal(fd));
                 nd.preClose(fd);
                 if (NativeThread.isKernelThread(reader))
@@ -1147,7 +1149,7 @@ public final class NioSocketImpl extends SocketImpl implements PlatformSocketImp
             ensureOpenAndConnected();
             if (!isInputClosed) {
                 Net.shutdown(fd, Net.SHUT_RD);
-                if (NativeThread.isFiber(readerThread)) {
+                if (NativeThread.isVirtualThread(readerThread)) {
                     Poller.stopPoll(fdVal(fd), Net.POLLIN);
                 }
                 isInputClosed = true;
@@ -1161,7 +1163,7 @@ public final class NioSocketImpl extends SocketImpl implements PlatformSocketImp
             ensureOpenAndConnected();
             if (!isOutputClosed) {
                 Net.shutdown(fd, Net.SHUT_WR);
-                if (NativeThread.isFiber(writerThread)) {
+                if (NativeThread.isVirtualThread(writerThread)) {
                     Poller.stopPoll(fdVal(fd), Net.POLLOUT);
                 }
                 isOutputClosed = true;
@@ -1197,53 +1199,28 @@ public final class NioSocketImpl extends SocketImpl implements PlatformSocketImp
     }
 
     /**
-     * A task that closes a SocketImpl's file descriptor. The task runs when the
-     * SocketImpl is explicitly closed and when the SocketImpl becomes phantom
-     * reachable.
+     * Returns an action to close the given file descriptor.
      */
-    private static class FileDescriptorCloser implements Runnable {
-        private static final VarHandle CLOSED;
-        static {
-            try {
-                MethodHandles.Lookup l = MethodHandles.lookup();
-                CLOSED = l.findVarHandle(FileDescriptorCloser.class,
-                                         "closed",
-                                         boolean.class);
-            } catch (Exception e) {
-                throw new InternalError(e);
-            }
-        }
-
-        private final FileDescriptor fd;
-        private final boolean stream;
-        private volatile boolean closed;
-
-        FileDescriptorCloser(FileDescriptor fd, boolean stream) {
-            this.fd = fd;
-            this.stream = stream;
-        }
-
-        static FileDescriptorCloser create(NioSocketImpl impl) {
-            assert Thread.holdsLock(impl.stateLock);
-            var closer = new FileDescriptorCloser(impl.fd, impl.stream);
-            CleanerFactory.cleaner().register(impl, closer);
-            return closer;
-        }
-
-        @Override
-        public void run() {
-            if (CLOSED.compareAndSet(this, false, true)) {
+    private static Runnable closerFor(FileDescriptor fd, boolean stream) {
+        if (stream) {
+            return () -> {
+                try {
+                    nd.close(fd);
+                } catch (IOException ioe) {
+                    throw new UncheckedIOException(ioe);
+                }
+            };
+        } else {
+            return () -> {
                 try {
                     nd.close(fd);
                 } catch (IOException ioe) {
                     throw new UncheckedIOException(ioe);
                 } finally {
-                    if (!stream) {
-                        // decrement
-                        ResourceManager.afterUdpClose();
-                    }
+                    // decrement
+                    ResourceManager.afterUdpClose();
                 }
-            }
+            };
         }
     }
 

@@ -26,8 +26,8 @@
 #define CPU_X86_VM_VERSION_X86_HPP
 
 #include "memory/universe.hpp"
+#include "runtime/abstract_vm_version.hpp"
 #include "runtime/globals_extension.hpp"
-#include "runtime/vm_version.hpp"
 
 class VM_Version : public Abstract_VM_Version {
   friend class VMStructs;
@@ -163,7 +163,10 @@ class VM_Version : public Abstract_VM_Version {
                mmx_amd   : 1,
                mmx       : 1,
                fxsr      : 1,
-                         : 4,
+               fxsr_opt  : 1,
+               pdpe1gb   : 1,
+               rdtscp    : 1,
+                         : 1,
                long_mode : 1,
                tdnow2    : 1,
                tdnow     : 1;
@@ -245,12 +248,16 @@ class VM_Version : public Abstract_VM_Version {
                            : 1,
                       gfni : 1,
                       vaes : 1,
-                vpclmulqdq : 1,
+         avx512_vpclmulqdq : 1,
                avx512_vnni : 1,
              avx512_bitalg : 1,
                            : 1,
           avx512_vpopcntdq : 1,
-                           : 17;
+                           : 1,
+                           : 1,
+                     mawau : 5,
+                     rdpid : 1,
+                           : 9;
     } bits;
   };
 
@@ -260,7 +267,8 @@ class VM_Version : public Abstract_VM_Version {
       uint32_t             : 2,
              avx512_4vnniw : 1,
              avx512_4fmaps : 1,
-                           : 28;
+        fast_short_rep_mov : 1,
+                           : 27;
     } bits;
   };
 
@@ -328,23 +336,27 @@ protected:
     CPU_AVX512DQ = (1 << 27),
     CPU_AVX512PF = (1 << 28),
     CPU_AVX512ER = (1 << 29),
-    CPU_AVX512CD = (1 << 30)
+    CPU_AVX512CD = (1 << 30),
     // Keeping sign bit 31 unassigned.
   };
 
+// TODO: change the above to  `enum Feature_Flag : uint64_t` and add the following to the enum
 #define CPU_AVX512BW ((uint64_t)UCONST64(0x100000000)) // enums are limited to 31 bit
 #define CPU_AVX512VL ((uint64_t)UCONST64(0x200000000)) // EVEX instructions with smaller vector length
 #define CPU_SHA ((uint64_t)UCONST64(0x400000000))      // SHA instructions
 #define CPU_FMA ((uint64_t)UCONST64(0x800000000))      // FMA instructions
 #define CPU_VZEROUPPER ((uint64_t)UCONST64(0x1000000000))       // Vzeroupper instruction
 #define CPU_AVX512_VPOPCNTDQ ((uint64_t)UCONST64(0x2000000000)) // Vector popcount
-#define CPU_VPCLMULQDQ ((uint64_t)UCONST64(0x4000000000)) //Vector carryless multiplication
+#define CPU_AVX512_VPCLMULQDQ ((uint64_t)UCONST64(0x4000000000)) //Vector carryless multiplication
 #define CPU_VAES ((uint64_t)UCONST64(0x8000000000))    // Vector AES instructions
 #define CPU_VNNI ((uint64_t)UCONST64(0x10000000000))   // Vector Neural Network Instructions
-
 #define CPU_FLUSH ((uint64_t)UCONST64(0x20000000000))  // flush instruction
 #define CPU_FLUSHOPT ((uint64_t)UCONST64(0x40000000000)) // flushopt instruction
 #define CPU_CLWB ((uint64_t)UCONST64(0x80000000000))   // clwb instruction
+#define CPU_VBMI2 ((uint64_t)UCONST64(0x100000000000))   // VBMI2 shift left double instructions
+#define CPU_RDTSCP ((uint64_t)UCONST64(0x100000000000)) // RDTSCP instruction
+#define CPU_RDPID  ((uint64_t)UCONST64(0x200000000000)) // RDPID instruction
+#define CPU_FSRM ((uint64_t)UCONST64(0x400000000000))   // Fast Short REP MOV
 
 enum Extended_Family {
     // AMD
@@ -366,7 +378,7 @@ enum Extended_Family {
     CPU_MODEL_HASWELL_E3     = 0x3c,
     CPU_MODEL_HASWELL_E7     = 0x3f,
     CPU_MODEL_BROADWELL      = 0x3d,
-    CPU_MODEL_SKYLAKE        = CPU_MODEL_HASWELL_E3
+    CPU_MODEL_SKYLAKE        = 0x55
   };
 
   // cpuid information block.  All info derived from executing cpuid with
@@ -561,12 +573,14 @@ enum Extended_Family {
           result |= CPU_AVX512VL;
         if (_cpuid_info.sef_cpuid7_ecx.bits.avx512_vpopcntdq != 0)
           result |= CPU_AVX512_VPOPCNTDQ;
-        if (_cpuid_info.sef_cpuid7_ecx.bits.vpclmulqdq != 0)
-          result |= CPU_VPCLMULQDQ;
+        if (_cpuid_info.sef_cpuid7_ecx.bits.avx512_vpclmulqdq != 0)
+          result |= CPU_AVX512_VPCLMULQDQ;
         if (_cpuid_info.sef_cpuid7_ecx.bits.vaes != 0)
           result |= CPU_VAES;
         if (_cpuid_info.sef_cpuid7_ecx.bits.avx512_vnni != 0)
           result |= CPU_VNNI;
+        if (_cpuid_info.sef_cpuid7_ecx.bits.avx512_vbmi2 != 0)
+          result |= CPU_VBMI2;
       }
     }
     if (_cpuid_info.sef_cpuid7_ebx.bits.bmi1 != 0)
@@ -579,6 +593,8 @@ enum Extended_Family {
       result |= CPU_AES;
     if (_cpuid_info.sef_cpuid7_ebx.bits.erms != 0)
       result |= CPU_ERMS;
+    if (_cpuid_info.sef_cpuid7_edx.bits.fast_short_rep_mov != 0)
+      result |= CPU_FSRM;
     if (_cpuid_info.std_cpuid1_ecx.bits.clmul != 0)
       result |= CPU_CLMUL;
     if (_cpuid_info.sef_cpuid7_ebx.bits.rtm != 0)
@@ -593,6 +609,10 @@ enum Extended_Family {
       result |= CPU_FMA;
     if (_cpuid_info.sef_cpuid7_ebx.bits.clflushopt != 0)
       result |= CPU_FLUSHOPT;
+    if (_cpuid_info.ext_cpuid1_edx.bits.rdtscp != 0)
+      result |= CPU_RDTSCP;
+    if (_cpuid_info.sef_cpuid7_ecx.bits.rdpid != 0)
+      result |= CPU_RDPID;
 
     // AMD|Hygon features.
     if (is_amd_family()) {
@@ -828,9 +848,12 @@ public:
   static bool supports_popcnt()   { return (_features & CPU_POPCNT) != 0; }
   static bool supports_avx()      { return (_features & CPU_AVX) != 0; }
   static bool supports_avx2()     { return (_features & CPU_AVX2) != 0; }
-  static bool supports_tsc()      { return (_features & CPU_TSC)    != 0; }
+  static bool supports_tsc()      { return (_features & CPU_TSC) != 0; }
+  static bool supports_rdtscp()   { return (_features & CPU_RDTSCP) != 0; }
+  static bool supports_rdpid()    { return (_features & CPU_RDPID) != 0; }
   static bool supports_aes()      { return (_features & CPU_AES) != 0; }
   static bool supports_erms()     { return (_features & CPU_ERMS) != 0; }
+  static bool supports_fsrm()     { return (_features & CPU_FSRM) != 0; }
   static bool supports_clmul()    { return (_features & CPU_CLMUL) != 0; }
   static bool supports_rtm()      { return (_features & CPU_RTM) != 0; }
   static bool supports_bmi1()     { return (_features & CPU_BMI1) != 0; }
@@ -855,9 +878,10 @@ public:
   static bool supports_fma()        { return (_features & CPU_FMA) != 0 && supports_avx(); }
   static bool supports_vzeroupper() { return (_features & CPU_VZEROUPPER) != 0; }
   static bool supports_vpopcntdq()  { return (_features & CPU_AVX512_VPOPCNTDQ) != 0; }
-  static bool supports_vpclmulqdq() { return (_features & CPU_VPCLMULQDQ) != 0; }
+  static bool supports_avx512_vpclmulqdq() { return (_features & CPU_AVX512_VPCLMULQDQ) != 0; }
   static bool supports_vaes()       { return (_features & CPU_VAES) != 0; }
   static bool supports_vnni()       { return (_features & CPU_VNNI) != 0; }
+  static bool supports_vbmi2()      { return (_features & CPU_VBMI2) != 0; }
 
   // Intel features
   static bool is_intel_family_core() { return is_intel() &&

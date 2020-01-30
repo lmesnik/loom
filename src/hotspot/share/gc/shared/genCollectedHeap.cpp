@@ -55,6 +55,7 @@
 #include "gc/shared/weakProcessor.hpp"
 #include "gc/shared/workgroup.hpp"
 #include "memory/filemap.hpp"
+#include "memory/iterator.hpp"
 #include "memory/metaspaceCounters.hpp"
 #include "memory/resourceArea.hpp"
 #include "memory/universe.hpp"
@@ -418,35 +419,6 @@ HeapWord* GenCollectedHeap::mem_allocate_work(size_t size,
   }
 }
 
-#ifndef PRODUCT
-// Override of memory state checking method in CollectedHeap:
-// Some collectors (CMS for example) can't have badHeapWordVal written
-// in the first two words of an object. (For instance , in the case of
-// CMS these words hold state used to synchronize between certain
-// (concurrent) GC steps and direct allocating mutators.)
-// The skip_header_HeapWords() method below, allows us to skip
-// over the requisite number of HeapWord's. Note that (for
-// generational collectors) this means that those many words are
-// skipped in each object, irrespective of the generation in which
-// that object lives. The resultant loss of precision seems to be
-// harmless and the pain of avoiding that imprecision appears somewhat
-// higher than we are prepared to pay for such rudimentary debugging
-// support.
-void GenCollectedHeap::check_for_non_bad_heap_word_value(HeapWord* addr,
-                                                         size_t size) {
-  if (CheckMemoryInitialization && ZapUnusedHeapArea) {
-    // We are asked to check a size in HeapWords,
-    // but the memory is mangled in juint words.
-    juint* start = (juint*) (addr + skip_header_HeapWords());
-    juint* end   = (juint*) (addr + size);
-    for (juint* slot = start; slot < end; slot += 1) {
-      assert(*slot == badHeapWordVal,
-             "Found non badHeapWordValue in pre-allocation check");
-    }
-  }
-}
-#endif
-
 HeapWord* GenCollectedHeap::attempt_allocation(size_t size,
                                                bool is_tlab,
                                                bool first_only) {
@@ -500,7 +472,7 @@ void GenCollectedHeap::collect_generation(Generation* gen, bool full, size_t siz
     HandleMark hm;  // Discard invalid handles created during verification
     Universe::verify("Before GC");
   }
-  COMPILER2_PRESENT(DerivedPointerTable::clear());
+  COMPILER2_OR_JVMCI_PRESENT(DerivedPointerTable::clear());
 
   if (restore_marks_for_biased_locking) {
     // We perform this mark word preservation work lazily
@@ -548,7 +520,7 @@ void GenCollectedHeap::collect_generation(Generation* gen, bool full, size_t siz
     rp->verify_no_references_recorded();
   }
 
-  COMPILER2_PRESENT(DerivedPointerTable::update_pointers());
+  COMPILER2_OR_JVMCI_PRESENT(DerivedPointerTable::update_pointers());
 
   gen->stat_record()->accumulated_time.stop();
 
@@ -1031,7 +1003,7 @@ void GenCollectedHeap::do_full_collection(bool clear_all_soft_refs,
   }
 }
 
-bool GenCollectedHeap::is_in_young(oop p) {
+bool GenCollectedHeap::is_in_young(oop p) const {
   bool result = ((HeapWord*)p) < _old_gen->reserved().start();
   assert(result == _young_gen->is_in_reserved(p),
          "incorrect test - result=%d, p=" INTPTR_FORMAT, result, p2i((void*)p));
@@ -1061,11 +1033,6 @@ void GenCollectedHeap::oop_iterate(OopIterateClosure* cl) {
 void GenCollectedHeap::object_iterate(ObjectClosure* cl) {
   _young_gen->object_iterate(cl);
   _old_gen->object_iterate(cl);
-}
-
-void GenCollectedHeap::safe_object_iterate(ObjectClosure* cl) {
-  _young_gen->safe_object_iterate(cl);
-  _old_gen->safe_object_iterate(cl);
 }
 
 Space* GenCollectedHeap::space_containing(const void* addr) const {
@@ -1229,8 +1196,7 @@ void GenCollectedHeap::save_marks() {
 GenCollectedHeap* GenCollectedHeap::heap() {
   CollectedHeap* heap = Universe::heap();
   assert(heap != NULL, "Uninitialized access to GenCollectedHeap::heap()");
-  assert(heap->kind() == CollectedHeap::Serial ||
-         heap->kind() == CollectedHeap::CMS, "Invalid name");
+  assert(heap->kind() == CollectedHeap::Serial, "Invalid name");
   return (GenCollectedHeap*) heap;
 }
 
@@ -1327,6 +1293,10 @@ void GenCollectedHeap::gc_prologue(bool full) {
   // Walk generations
   GenGCPrologueClosure blk(full);
   generation_iterate(&blk, false);  // not old-to-young.
+
+  if (full) {
+    CodeCache::increment_marking_cycle();
+  }
 };
 
 class GenGCEpilogueClosure: public GenCollectedHeap::GenClosure {
@@ -1345,6 +1315,10 @@ void GenCollectedHeap::gc_epilogue(bool full) {
   size_t actual_gap = pointer_delta((HeapWord*) (max_uintx-3), *(end_addr()));
   guarantee(is_client_compilation_mode_vm() || actual_gap > (size_t)FastAllocateSizeLimit, "inline allocation wraps");
 #endif // COMPILER2_OR_JVMCI
+
+  if (full) {
+    CodeCache::increment_marking_cycle();
+  }
 
   resize_all_tlabs();
 

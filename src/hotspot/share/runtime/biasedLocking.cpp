@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,6 +35,8 @@
 #include "runtime/basicLock.hpp"
 #include "runtime/biasedLocking.hpp"
 #include "runtime/handles.inline.hpp"
+#include "runtime/handshake.hpp"
+#include "runtime/safepointMechanism.hpp"
 #include "runtime/task.hpp"
 #include "runtime/threadSMR.hpp"
 #include "runtime/vframe.hpp"
@@ -61,8 +63,6 @@ class VM_EnableBiasedLocking: public VM_Operation {
  public:
   VM_EnableBiasedLocking() {}
   VMOp_Type type() const          { return VMOp_EnableBiasedLocking; }
-  Mode evaluation_mode() const    { return _async_safepoint; }
-  bool is_cheap_allocated() const { return true; }
 
   void doit() {
     // Iterate the class loader data dictionaries enabling biased locking for all
@@ -82,10 +82,8 @@ class EnableBiasedLockingTask : public PeriodicTask {
   EnableBiasedLockingTask(size_t interval_time) : PeriodicTask(interval_time) {}
 
   virtual void task() {
-    // Use async VM operation to avoid blocking the Watcher thread.
-    // VM Thread will free C heap storage.
-    VM_EnableBiasedLocking *op = new VM_EnableBiasedLocking();
-    VMThread::execute(op);
+    VM_EnableBiasedLocking op;
+    VMThread::execute(&op);
 
     // Reclaim our storage and disenroll ourself
     delete this;
@@ -504,7 +502,7 @@ public:
 };
 
 
-class RevokeOneBias : public ThreadClosure {
+class RevokeOneBias : public HandshakeClosure {
 protected:
   Handle _obj;
   JavaThread* _requesting_thread;
@@ -514,7 +512,8 @@ protected:
 
 public:
   RevokeOneBias(Handle obj, JavaThread* requesting_thread, JavaThread* biased_locker)
-    : _obj(obj)
+    : HandshakeClosure("RevokeOneBias")
+    , _obj(obj)
     , _requesting_thread(requesting_thread)
     , _biased_locker(biased_locker)
     , _status_code(BiasedLocking::NOT_BIASED)
@@ -623,7 +622,7 @@ BiasedLocking::Condition BiasedLocking::single_revoke_with_handshake(Handle obj,
                                      p2i(biaser), p2i(obj()));
 
   RevokeOneBias revoke(obj, requester, biaser);
-  bool executed = Handshake::execute(&revoke, biaser);
+  bool executed = Handshake::execute_direct(&revoke, biaser);
   if (revoke.status_code() == NOT_REVOKED) {
     return NOT_REVOKED;
   }
@@ -667,9 +666,10 @@ BiasedLocking::Condition BiasedLocking::single_revoke_with_handshake(Handle obj,
 
 // Caller should have instantiated a ResourceMark object before calling this method
 void BiasedLocking::walk_stack_and_revoke(oop obj, JavaThread* biased_locker) {
-  assert(!SafepointSynchronize::is_at_safepoint() || !ThreadLocalHandshakes,
-         "if ThreadLocalHandshakes is enabled this should always be executed outside safepoints");
-  assert(Thread::current() == biased_locker || Thread::current()->is_VM_thread(), "wrong thread");
+  assert(!SafepointSynchronize::is_at_safepoint() || !SafepointMechanism::uses_thread_local_poll(),
+         "if SafepointMechanism::uses_thread_local_poll() is enabled this should always be executed outside safepoints");
+  Thread* cur = Thread::current();
+  assert(cur == biased_locker || cur == biased_locker->get_active_handshaker() || cur->is_VM_thread(), "wrong thread");
 
   markWord mark = obj->mark();
   assert(mark.biased_locker() == biased_locker &&
@@ -678,14 +678,14 @@ void BiasedLocking::walk_stack_and_revoke(oop obj, JavaThread* biased_locker) {
   log_trace(biasedlocking)("%s(" INTPTR_FORMAT ") revoking object " INTPTR_FORMAT ", mark "
                            INTPTR_FORMAT ", type %s, prototype header " INTPTR_FORMAT
                            ", biaser " INTPTR_FORMAT " %s",
-                           Thread::current()->is_VM_thread() ? "VMThread" : "JavaThread",
-                           p2i(Thread::current()),
+                           cur->is_VM_thread() ? "VMThread" : "JavaThread",
+                           p2i(cur),
                            p2i(obj),
                            mark.value(),
                            obj->klass()->external_name(),
                            obj->klass()->prototype_header().value(),
                            p2i(biased_locker),
-                           Thread::current()->is_VM_thread() ? "" : "(walking own stack)");
+                           cur->is_VM_thread() ? "" : "(walking own stack)");
 
   markWord unbiased_prototype = markWord::prototype().set_age(obj->mark().age());
 

@@ -801,7 +801,8 @@ BoolNode* PhaseIdealLoop::rc_predicate(IdealLoopTree *loop, Node* ctrl,
 
   if (TraceLoopPredicate) {
     predString->print_cr("<u range");
-    tty->print("%s", predString->as_string());
+    tty->print("%s", predString->base());
+    predString->~stringStream();
   }
   return bol;
 }
@@ -1381,7 +1382,6 @@ bool PhaseIdealLoop::loop_predication_impl(IdealLoopTree *loop) {
     } // end while
   }
 
-  Node_List if_proj_list_freq(area);
   if (follow_branches) {
     PathFrequency pf(loop->_head, this);
 
@@ -1399,6 +1399,7 @@ bool PhaseIdealLoop::loop_predication_impl(IdealLoopTree *loop) {
     // And look into all branches
     Node_Stack stack(0);
     VectorSet seen(Thread::current()->resource_area());
+    Node_List if_proj_list_freq(area);
     while (regions.size() > 0) {
       Node* c = regions.pop();
       loop_predication_follow_branches(c, loop, loop_trip_cnt, pf, stack, seen, if_proj_list_freq);

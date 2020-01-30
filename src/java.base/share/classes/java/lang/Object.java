@@ -38,11 +38,6 @@ import jdk.internal.HotSpotIntrinsicCandidate;
  */
 public class Object {
 
-    private static native void registerNatives();
-    static {
-        registerNatives();
-    }
-
     /**
      * Constructs a new object.
      */
@@ -351,9 +346,9 @@ public class Object {
         try {
             wait0(timeoutMillis);
         } catch (InterruptedException e) {
-            Fiber<?> fiber = Fiber.currentFiber();
-            if (fiber != null) {
-                fiber.isInterrupted(true);
+            Thread thread = Thread.currentThread();
+            if (thread.isVirtual()) {
+                thread.clearInterrupt();
             }
             throw e;
         }

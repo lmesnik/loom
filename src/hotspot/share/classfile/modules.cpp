@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
+* Copyright (c) 2016, 2020, Oracle and/or its affiliates. All rights reserved.
 * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 *
 * This code is free software; you can redistribute it and/or modify it
@@ -194,7 +194,7 @@ static void define_javabase_module(jobject module, jstring version,
 
   bool duplicate_javabase = false;
   {
-    MutexLocker m1(Module_lock, THREAD);
+    MutexLocker m1(THREAD, Module_lock);
 
     if (ModuleEntryTable::javabase_defined()) {
       duplicate_javabase = true;
@@ -331,7 +331,7 @@ void Modules::define_module(jobject module, jboolean is_open, jstring version,
     if (!h_loader.is_null() &&
         !SystemDictionary::is_platform_class_loader(h_loader()) &&
         (strncmp(package_name, JAVAPKG, JAVAPKG_LEN) == 0 &&
-          (package_name[JAVAPKG_LEN] == '/' || package_name[JAVAPKG_LEN] == '\0'))) {
+          (package_name[JAVAPKG_LEN] == JVM_SIGNATURE_SLASH || package_name[JAVAPKG_LEN] == '\0'))) {
       const char* class_loader_name = loader_data->loader_name_and_id();
       size_t pkg_len = strlen(package_name);
       char* pkg_name = NEW_RESOURCE_ARRAY_IN_THREAD(THREAD, char, pkg_len + 1);
@@ -379,7 +379,7 @@ void Modules::define_module(jobject module, jboolean is_open, jstring version,
   PackageEntryTable* package_table = NULL;
   PackageEntry* existing_pkg = NULL;
   {
-    MutexLocker ml(Module_lock, THREAD);
+    MutexLocker ml(THREAD, Module_lock);
 
     if (num_packages > 0) {
       package_table = get_package_entry_table(h_loader);

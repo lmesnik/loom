@@ -39,6 +39,8 @@
 #include "gc/z/zUnload.hpp"
 #include "gc/z/zWorkers.hpp"
 
+class ThreadClosure;
+
 class ZHeap {
   friend class VMStructs;
 
@@ -62,9 +64,6 @@ private:
   size_t heap_initial_size() const;
   size_t heap_max_size() const;
   size_t heap_max_reserve_size() const;
-
-  void before_flip();
-  void after_flip();
 
   void flip_to_marked();
   void flip_to_remapped();
@@ -138,6 +137,7 @@ public:
   void mark(bool initial);
   void mark_flush_and_free(Thread* thread);
   bool mark_end();
+  void keep_alive(oop obj);
 
   // Relocation set
   void select_relocation_set();
@@ -149,8 +149,12 @@ public:
   uintptr_t remap_object(uintptr_t addr);
   void relocate();
 
+  // Continuations
+  bool is_allocating(uintptr_t addr) const;
+
   // Iteration
   void object_iterate(ObjectClosure* cl, bool visit_weaks);
+  void pages_do(ZPageClosure* cl);
 
   // Serviceability
   void serviceability_initialize();

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -136,14 +136,14 @@ import sun.util.locale.provider.ResourceBundleBasedAdapter;
  * the same behavior as {@code "#,##0.0#;(#,##0.0#)"}.
  *
  * <p>The prefixes, suffixes, and various symbols used for infinity, digits,
- * thousands separators, decimal separators, etc. may be set to arbitrary
+ * grouping separators, decimal separators, etc. may be set to arbitrary
  * values, and they will appear properly during formatting.  However, care must
  * be taken that the symbols and strings do not conflict, or parsing will be
  * unreliable.  For example, either the positive and negative prefixes or the
  * suffixes must be distinct for {@code DecimalFormat.parse()} to be able
  * to distinguish positive from negative values.  (If they are identical, then
  * {@code DecimalFormat} will behave as if no negative subpattern was
- * specified.)  Another example is that the decimal separator and thousands
+ * specified.)  Another example is that the decimal separator and grouping
  * separator should be distinct characters, or parsing will be impossible.
  *
  * <p>The grouping separator is commonly used for thousands, but in some
@@ -203,7 +203,7 @@ import sun.util.locale.provider.ResourceBundleBasedAdapter;
  *          <th scope="row">{@code ,}
  *          <td>Number
  *          <td>Yes
- *          <td>Grouping separator
+ *          <td>Grouping separator or monetary grouping separator
  *     <tr style="vertical-align: top">
  *          <th scope="row">{@code E}
  *          <td>Number
@@ -231,8 +231,8 @@ import sun.util.locale.provider.ResourceBundleBasedAdapter;
  *          <td>No
  *          <td>Currency sign, replaced by currency symbol.  If
  *              doubled, replaced by international currency symbol.
- *              If present in a pattern, the monetary decimal separator
- *              is used instead of the decimal separator.
+ *              If present in a pattern, the monetary decimal/grouping separators
+ *              are used instead of the decimal/grouping separators.
  *     <tr style="vertical-align:top">
  *          <th scope="row">{@code '}
  *          <td>Prefix or suffix
@@ -1103,7 +1103,9 @@ public class DecimalFormat extends NumberFormat {
             // Sets up the locale specific constants used when formatting.
             // '0' is our default representation of zero.
             fastPathData.zeroDelta = symbols.getZeroDigit() - '0';
-            fastPathData.groupingChar = symbols.getGroupingSeparator();
+            fastPathData.groupingChar = isCurrencyFormat ?
+                    symbols.getMonetaryGroupingSeparator() :
+                    symbols.getGroupingSeparator();
 
             // Sets up fractional constants related to currency/decimal pattern.
             fastPathData.fractionalMaxIntBound = (isCurrencyFormat)
@@ -1774,7 +1776,9 @@ public class DecimalFormat extends NumberFormat {
             int maxIntDigits, int minIntDigits,
             int maxFraDigits, int minFraDigits) {
 
-        char grouping = symbols.getGroupingSeparator();
+        char grouping = isCurrencyFormat ?
+                symbols.getMonetaryGroupingSeparator() :
+                symbols.getGroupingSeparator();
         char zero = symbols.getZeroDigit();
         int zeroDelta = zero - '0'; // '0' is the DigitList representation of zero
 
@@ -2393,7 +2397,9 @@ public class DecimalFormat extends NumberFormat {
             char decimal = isCurrencyFormat ?
                     symbols.getMonetaryDecimalSeparator() :
                     symbols.getDecimalSeparator();
-            char grouping = symbols.getGroupingSeparator();
+            char grouping = isCurrencyFormat ?
+                    symbols.getMonetaryGroupingSeparator() :
+                    symbols.getGroupingSeparator();
             String exponentString = symbols.getExponentSeparator();
             boolean sawDecimal = false;
             boolean sawExponent = false;
@@ -2756,7 +2762,10 @@ public class DecimalFormat extends NumberFormat {
     /**
      * Return the grouping size. Grouping size is the number of digits between
      * grouping separators in the integer portion of a number.  For example,
-     * in the number "123,456.78", the grouping size is 3.
+     * in the number "123,456.78", the grouping size is 3. Grouping size of
+     * zero designates that grouping is not used, which provides the same
+     * formatting as if calling {@link #setGroupingUsed(boolean)
+     * setGroupingUsed(false)}.
      *
      * @return the grouping size
      * @see #setGroupingSize
@@ -2770,16 +2779,28 @@ public class DecimalFormat extends NumberFormat {
     /**
      * Set the grouping size. Grouping size is the number of digits between
      * grouping separators in the integer portion of a number.  For example,
-     * in the number "123,456.78", the grouping size is 3.
-     * <br>
+     * in the number "123,456.78", the grouping size is 3. Grouping size of
+     * zero designates that grouping is not used, which provides the same
+     * formatting as if calling {@link #setGroupingUsed(boolean)
+     * setGroupingUsed(false)}.
+     * <p>
      * The value passed in is converted to a byte, which may lose information.
+     * Values that are negative or greater than
+     * {@link java.lang.Byte#MAX_VALUE Byte.MAX_VALUE}, will throw an
+     * {@code IllegalArgumentException}.
      *
      * @param newValue the new grouping size
      * @see #getGroupingSize
      * @see java.text.NumberFormat#setGroupingUsed
      * @see java.text.DecimalFormatSymbols#setGroupingSeparator
+     * @throws IllegalArgumentException if {@code newValue} is negative or
+     *          greater than {@link java.lang.Byte#MAX_VALUE Byte.MAX_VALUE}
      */
     public void setGroupingSize (int newValue) {
+        if (newValue < 0 || newValue > Byte.MAX_VALUE) {
+            throw new IllegalArgumentException(
+                "newValue is out of valid range. value: " + newValue);
+        }
         groupingSize = (byte)newValue;
         fastPathCheckNeeded = true;
     }
@@ -3906,6 +3927,12 @@ public class DecimalFormat extends NumberFormat {
             // Didn't have exponential fields
             useExponentialNotation = false;
         }
+
+        // Restore the invariant value if groupingSize is invalid.
+        if (groupingSize < 0) {
+            groupingSize = 3;
+        }
+
         serialVersionOnStream = currentSerialVersion;
     }
 
@@ -4009,14 +4036,15 @@ public class DecimalFormat extends NumberFormat {
 
     /**
      * The number of digits between grouping separators in the integer
-     * portion of a number.  Must be greater than 0 if
+     * portion of a number.  Must be non-negative and less than or equal to
+     * {@link java.lang.Byte#MAX_VALUE Byte.MAX_VALUE} if
      * {@code NumberFormat.groupingUsed} is true.
      *
      * @serial
      * @see #getGroupingSize
      * @see java.text.NumberFormat#isGroupingUsed
      */
-    private byte    groupingSize = 3;  // invariant, > 0 if useThousands
+    private byte    groupingSize = 3;  // invariant, 0 - 127, if groupingUsed
 
     /**
      * If true, forces the decimal separator to always appear in a formatted
@@ -4039,7 +4067,7 @@ public class DecimalFormat extends NumberFormat {
 
     /**
      * True if this object represents a currency format.  This determines
-     * whether the monetary decimal separator is used instead of the normal one.
+     * whether the monetary decimal/grouping separators are used instead of the normal ones.
      */
     private transient boolean isCurrencyFormat = false;
 
@@ -4324,8 +4352,8 @@ public class DecimalFormat extends NumberFormat {
      * The CURRENCY_SIGN is the standard Unicode symbol for currency.  It
      * is used in patterns and substituted with either the currency symbol,
      * or if it is doubled, with the international currency symbol.  If the
-     * CURRENCY_SIGN is seen in a pattern, then the decimal separator is
-     * replaced with the monetary decimal separator.
+     * CURRENCY_SIGN is seen in a pattern, then the decimal/grouping separators
+     * are replaced with the monetary decimal/grouping separators.
      *
      * The CURRENCY_SIGN is not localized.
      */

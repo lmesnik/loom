@@ -65,11 +65,15 @@ public class DoContinueSingleStepTest {
     };
 
     public static void test1() throws Exception {
-        try (var scope = FiberScope.open()) {
-            scope.schedule(PRODUCER);
-            scope.schedule(CONSUMER);
-            scope.schedule(CONSUMER);
-        }
+        Thread p1 = Thread.newThread(Thread.VIRTUAL, PRODUCER);
+        Thread c1 = Thread.newThread(Thread.VIRTUAL, CONSUMER);
+        Thread c2 = Thread.newThread(Thread.VIRTUAL, CONSUMER);
+        p1.start();
+        c1.start();
+        c2.start();
+        p1.join();
+        c1.join();
+        c2.join();
     }
 
     void runTest() throws Exception {

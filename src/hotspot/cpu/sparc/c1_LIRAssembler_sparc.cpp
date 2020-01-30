@@ -31,8 +31,6 @@
 #include "c1/c1_ValueStack.hpp"
 #include "ci/ciArrayKlass.hpp"
 #include "ci/ciInstance.hpp"
-#include "gc/shared/barrierSet.hpp"
-#include "gc/shared/cardTableBarrierSet.hpp"
 #include "gc/shared/collectedHeap.hpp"
 #include "memory/universe.hpp"
 #include "nativeInst_sparc.hpp"
@@ -1507,6 +1505,18 @@ void LIR_Assembler::comp_op(LIR_Condition condition, LIR_Opr opr1, LIR_Opr opr2,
             } else {
               jobject2reg(con, O7);
               __ cmp(opr1->as_register(), O7);
+            }
+          }
+          break;
+
+        case T_METADATA:
+          // We only need, for now, comparison with NULL for metadata.
+          { assert(condition == lir_cond_equal || condition == lir_cond_notEqual, "oops");
+            Metadata* m = opr2->as_constant_ptr()->as_metadata();
+            if (m == NULL) {
+              __ cmp(opr1->as_register(), 0);
+            } else {
+              ShouldNotReachHere();
             }
           }
           break;

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -106,14 +106,14 @@ Klass* ObjArrayKlass::allocate_objArray_klass(ClassLoaderData* loader_data,
     int len = element_klass->name()->utf8_length();
     char *new_str = NEW_RESOURCE_ARRAY(char, len + 4);
     int idx = 0;
-    new_str[idx++] = '[';
+    new_str[idx++] = JVM_SIGNATURE_ARRAY;
     if (element_klass->is_instance_klass()) { // it could be an array or simple type
-      new_str[idx++] = 'L';
+      new_str[idx++] = JVM_SIGNATURE_CLASS;
     }
     memcpy(&new_str[idx], name_str, len * sizeof(char));
     idx += len;
     if (element_klass->is_instance_klass()) {
-      new_str[idx++] = ';';
+      new_str[idx++] = JVM_SIGNATURE_ENDCLASS;
     }
     new_str[idx++] = '\0';
     name = SymbolTable::new_permanent_symbol(new_str);
@@ -334,7 +334,7 @@ Klass* ObjArrayKlass::array_klass_impl(bool or_null, int n, TRAPS) {
     JavaThread *jt = (JavaThread *)THREAD;
     {
       // Ensure atomic creation of higher dimensions
-      MutexLocker mu(MultiArray_lock, THREAD);
+      MutexLocker mu(THREAD, MultiArray_lock);
 
       // Check if another thread beat us
       if (higher_dimension() == NULL) {

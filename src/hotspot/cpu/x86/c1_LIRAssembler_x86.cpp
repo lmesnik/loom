@@ -32,8 +32,6 @@
 #include "c1/c1_ValueStack.hpp"
 #include "ci/ciArrayKlass.hpp"
 #include "ci/ciInstance.hpp"
-#include "gc/shared/barrierSet.hpp"
-#include "gc/shared/cardTableBarrierSet.hpp"
 #include "gc/shared/collectedHeap.hpp"
 #include "nativeInst_x86.hpp"
 #include "oops/objArrayKlass.hpp"
@@ -466,7 +464,7 @@ int LIR_Assembler::emit_unwind_handler() {
 
   // Fetch the exception from TLS and clear out exception related thread state
   Register thread = NOT_LP64(rsi) LP64_ONLY(r15_thread);
-  NOT_LP64(__ get_thread(rsi));
+  NOT_LP64(__ get_thread(thread));
   __ movptr(rax, Address(thread, JavaThread::exception_oop_offset()));
   __ movptr(Address(thread, JavaThread::exception_oop_offset()), (intptr_t)NULL_WORD);
   __ movptr(Address(thread, JavaThread::exception_pc_offset()), (intptr_t)NULL_WORD);
@@ -484,6 +482,8 @@ int LIR_Assembler::emit_unwind_handler() {
     stub = new MonitorExitStub(FrameMap::rax_opr, true, 0);
     __ unlock_object(rdi, rsi, rax, *stub->entry());
     __ bind(*stub->continuation());
+    NOT_LP64(__ get_thread(thread);)
+    __ dec_held_monitor_count(thread);
   }
 
   if (compilation()->env()->dtrace_method_probes()) {
@@ -952,7 +952,7 @@ void LIR_Assembler::reg2stack(LIR_Opr src, LIR_Opr dest, BasicType type, bool po
     if (is_reference_type(type)) {
       __ verify_oop(src->as_register());
       __ movptr (dst, src->as_register());
-    } else if (type == T_METADATA) {
+    } else if (type == T_METADATA || type == T_ADDRESS) {
       __ movptr (dst, src->as_register());
     } else {
       __ movl (dst, src->as_register());
@@ -1133,7 +1133,7 @@ void LIR_Assembler::stack2reg(LIR_Opr src, LIR_Opr dest, BasicType type) {
     if (is_reference_type(type)) {
       __ movptr(dest->as_register(), frame_map()->address_for_slot(src->single_stack_ix()));
       __ verify_oop(dest->as_register());
-    } else if (type == T_METADATA) {
+    } else if (type == T_METADATA || type == T_ADDRESS) {
       __ movptr(dest->as_register(), frame_map()->address_for_slot(src->single_stack_ix()));
     } else {
       __ movl(dest->as_register(), frame_map()->address_for_slot(src->single_stack_ix()));
@@ -2658,6 +2658,15 @@ void LIR_Assembler::comp_op(LIR_Condition condition, LIR_Opr opr1, LIR_Opr opr2,
       LIR_Const* c = opr2->as_constant_ptr();
       if (c->type() == T_INT) {
         __ cmpl(reg1, c->as_jint());
+      } else if (c->type() == T_METADATA) {
+        // All we need for now is a comparison with NULL for equality.
+        assert(condition == lir_cond_equal || condition == lir_cond_notEqual, "oops");
+        Metadata* m = c->as_metadata();
+        if (m == NULL) {
+          __ cmpptr(reg1, (int32_t)0);
+        } else {
+          ShouldNotReachHere();
+        }
       } else if (is_reference_type(c->type())) {
         // In 64bit oops are single register
         jobject o = c->as_jobject();
@@ -3521,6 +3530,17 @@ void LIR_Assembler::emit_lock(LIR_OpLock* op) {
     Unimplemented();
   }
   __ bind(*op->stub()->continuation());
+  
+  NOT_LP64(Register scratch = op->scratch_opr()->as_register();)
+  Register thread = LP64_ONLY(r15_thread) NOT_LP64(scratch);
+  NOT_LP64(__ get_thread(thread);)
+  if (op->code() == lir_lock) {
+    __ inc_held_monitor_count(thread);
+  } else if (op->code() == lir_unlock) {
+    __ dec_held_monitor_count(thread);
+  } else {
+    Unimplemented();
+  }
 }
 
 

@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2019, Red Hat, Inc. All rights reserved.
+ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
@@ -47,7 +48,6 @@ public:
 
 void ShenandoahJFRSupport::register_jfr_type_serializers() {
   JfrSerializer::register_serializer(TYPE_SHENANDOAHHEAPREGIONSTATE,
-                                     false,
                                      true,
                                      new ShenandoahHeapRegionStateConstant());
 }

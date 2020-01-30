@@ -25,6 +25,8 @@
 
 package java.net;
 
+import sun.security.util.SecurityConstants;
+
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.IOException;
@@ -48,14 +50,59 @@ import java.util.Collections;
  * can configure itself to create sockets appropriate to the local
  * firewall.
  *
+ * <p> The {@code Socket} class defines convenience
+ * methods to set and get several socket options. This class also
+ * defines the {@link #setOption(SocketOption, Object) setOption}
+ * and {@link #getOption(SocketOption) getOption} methods to set
+ * and query socket options.
+ * A {@code Socket} support the following options:
+ * <blockquote>
+ * <table class="striped">
+ * <caption style="display:none">Socket options</caption>
+ * <thead>
+ *   <tr>
+ *     <th scope="col">Option Name</th>
+ *     <th scope="col">Description</th>
+ *   </tr>
+ * </thead>
+ * <tbody>
+ *   <tr>
+ *     <th scope="row"> {@link java.net.StandardSocketOptions#SO_SNDBUF SO_SNDBUF} </th>
+ *     <td> The size of the socket send buffer </td>
+ *   </tr>
+ *   <tr>
+ *     <th scope="row"> {@link java.net.StandardSocketOptions#SO_RCVBUF SO_RCVBUF} </th>
+ *     <td> The size of the socket receive buffer </td>
+ *   </tr>
+ *   <tr>
+ *     <th scope="row"> {@link java.net.StandardSocketOptions#SO_KEEPALIVE SO_KEEPALIVE} </th>
+ *     <td> Keep connection alive </td>
+ *   </tr>
+ *   <tr>
+ *     <th scope="row"> {@link java.net.StandardSocketOptions#SO_REUSEADDR SO_REUSEADDR} </th>
+ *     <td> Re-use address </td>
+ *   </tr>
+ *   <tr>
+ *     <th scope="row"> {@link java.net.StandardSocketOptions#SO_LINGER SO_LINGER} </th>
+ *     <td> Linger on close if data is present (when configured in blocking mode
+ *          only) </td>
+ *   </tr>
+ *   <tr>
+ *     <th scope="row"> {@link java.net.StandardSocketOptions#TCP_NODELAY TCP_NODELAY} </th>
+ *     <td> Disable the Nagle algorithm </td>
+ *   </tr>
+ * </tbody>
+ * </table>
+ * </blockquote>
+ * Additional (implementation specific) options may also be supported.
+ *
  * @author  unascribed
  * @see     java.net.Socket#setSocketImplFactory(java.net.SocketImplFactory)
  * @see     java.net.SocketImpl
  * @see     java.nio.channels.SocketChannel
  * @since   1.0
  */
-public
-class Socket implements java.io.Closeable {
+public class Socket implements java.io.Closeable {
     /**
      * Various states of this socket.
      */
@@ -182,10 +229,26 @@ class Socket implements java.io.Closeable {
      *
      * @throws    SocketException if there is an error in the underlying protocol,
      * such as a TCP error.
+     *
+     * @throws SecurityException if {@code impl} is non-null and a security manager is set
+     * and its {@code checkPermission} method doesn't allow {@code NetPermission("setSocketImpl")}.
+     *
      * @since   1.1
      */
     protected Socket(SocketImpl impl) throws SocketException {
+        checkPermission(impl);
         this.impl = impl;
+    }
+
+    private static Void checkPermission(SocketImpl impl) {
+        if (impl == null) {
+            return null;
+        }
+        SecurityManager sm = System.getSecurityManager();
+        if (sm != null) {
+            sm.checkPermission(SecurityConstants.SET_SOCKETIMPL_PERMISSION);
+        }
+        return null;
     }
 
     /**
@@ -1153,13 +1216,12 @@ class Socket implements java.io.Closeable {
     /**
      *  Enable/disable {@link SocketOptions#SO_TIMEOUT SO_TIMEOUT}
      *  with the specified timeout, in milliseconds. With this option set
-     *  to a non-zero timeout, a read() call on the InputStream associated with
+     *  to a positive timeout value, a read() call on the InputStream associated with
      *  this Socket will block for only this amount of time.  If the timeout
      *  expires, a <B>java.net.SocketTimeoutException</B> is raised, though the
-     *  Socket is still valid. The option <B>must</B> be enabled
-     *  prior to entering the blocking operation to have effect. The
-     *  timeout must be {@code > 0}.
-     *  A timeout of zero is interpreted as an infinite timeout.
+     *  Socket is still valid. A timeout of zero is interpreted as an infinite timeout.
+     *  The option <B>must</B> be enabled prior to entering the blocking operation
+     *  to have effect.
      *
      * @param timeout the specified timeout, in milliseconds.
      * @throws  SocketException if there is an error in the underlying protocol,

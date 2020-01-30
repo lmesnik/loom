@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -59,6 +59,7 @@
 #include "runtime/objectMonitor.inline.hpp"
 #include "runtime/os.inline.hpp"
 #include "runtime/safepointVerifiers.hpp"
+#include "runtime/serviceThread.hpp"
 #include "runtime/thread.inline.hpp"
 #include "runtime/threadSMR.hpp"
 #include "runtime/vframe.inline.hpp"
@@ -304,7 +305,7 @@ bool              JvmtiExport::_can_hotswap_or_post_breakpoint            = fals
 bool              JvmtiExport::_can_modify_any_class                      = false;
 bool              JvmtiExport::_can_walk_any_space                        = false;
 
-bool              JvmtiExport::_has_redefined_a_class                     = false;
+uint64_t          JvmtiExport::_redefinition_count                        = 0;
 bool              JvmtiExport::_all_dependencies_are_recorded             = false;
 
 //
@@ -773,6 +774,9 @@ JvmtiExport::cv_external_thread_to_JavaThread(ThreadsList * t_list,
 
   JavaThread * java_thread = java_lang_Thread::thread(thread_oop);
   if (java_thread == NULL) {
+    if (java_lang_VirtualThread::is_instance(thread_oop)) {
+      return JVMTI_ERROR_INVALID_THREAD;
+    }
     // The java.lang.Thread does not contain a JavaThread * so it has
     // not yet run or it has died.
     return JVMTI_ERROR_THREAD_NOT_ALIVE;
@@ -1205,6 +1209,7 @@ bool              JvmtiExport::_can_pop_frame                             = fals
 bool              JvmtiExport::_can_force_early_return                    = false;
 bool              JvmtiExport::_can_support_fibers                        = false;
 bool              JvmtiExport::_can_support_continuations                 = false;
+bool              JvmtiExport::_can_get_owned_monitor_info                = false;
 
 bool              JvmtiExport::_early_vmstart_recorded                    = false;
 
@@ -1357,20 +1362,26 @@ void JvmtiExport::post_class_unload(Klass* klass) {
   if (JvmtiEnv::get_phase() < JVMTI_PHASE_PRIMORDIAL) {
     return;
   }
-  Thread *thread = Thread::current();
+
+  // postings to the service thread so that it can perform them in a safe
+  // context and in-order.
+  ResourceMark rm;
+  // JvmtiDeferredEvent copies the string.
+  JvmtiDeferredEvent event = JvmtiDeferredEvent::class_unload_event(klass->name()->as_C_string());
+  ServiceThread::enqueue_deferred_event(&event);
+}
+
+
+void JvmtiExport::post_class_unload_internal(const char* name) {
+  if (JvmtiEnv::get_phase() < JVMTI_PHASE_PRIMORDIAL) {
+    return;
+  }
+  assert(Thread::current()->is_service_thread(), "must be called from ServiceThread");
+  JavaThread *thread = JavaThread::current();
   HandleMark hm(thread);
 
   EVT_TRIG_TRACE(EXT_EVENT_CLASS_UNLOAD, ("[?] Trg Class Unload triggered" ));
   if (JvmtiEventController::is_enabled((jvmtiEvent)EXT_EVENT_CLASS_UNLOAD)) {
-    assert(thread->is_VM_thread(), "wrong thread");
-
-    // get JavaThread for whom we are proxy
-    Thread *calling_thread = ((VMThread *)thread)->vm_operation()->calling_thread();
-    if (!calling_thread->is_Java_thread()) {
-      // cannot post an event to a non-JavaThread
-      return;
-    }
-    JavaThread *real_thread = (JavaThread *)calling_thread;
 
     JvmtiEnvIterator it;
     for (JvmtiEnv* env = it.first(); env != NULL; env = it.next(env)) {
@@ -1378,33 +1389,14 @@ void JvmtiExport::post_class_unload(Klass* klass) {
         continue;
       }
       if (env->is_enabled((jvmtiEvent)EXT_EVENT_CLASS_UNLOAD)) {
-        EVT_TRACE(EXT_EVENT_CLASS_UNLOAD, ("[?] Evt Class Unload sent %s",
-                  klass==NULL? "NULL" : klass->external_name() ));
+        EVT_TRACE(EXT_EVENT_CLASS_UNLOAD, ("[?] Evt Class Unload sent %s", name));
 
-        // do everything manually, since this is a proxy - needs special care
-        JNIEnv* jni_env = real_thread->jni_environment();
-        jthread jt = (jthread)JNIHandles::make_local(real_thread, real_thread->threadObj());
-        jclass jk = (jclass)JNIHandles::make_local(real_thread, klass->java_mirror());
-
-        // Before we call the JVMTI agent, we have to set the state in the
-        // thread for which we are proxying.
-        JavaThreadState prev_state = real_thread->thread_state();
-        assert(((Thread *)real_thread)->is_ConcurrentGC_thread() ||
-               (real_thread->is_Java_thread() && prev_state == _thread_blocked),
-               "should be ConcurrentGCThread or JavaThread at safepoint");
-        real_thread->set_thread_state(_thread_in_native);
-
+        JvmtiEventMark jem(thread);
+        JvmtiJavaThreadEventTransition jet(thread);
         jvmtiExtensionEvent callback = env->ext_callbacks()->ClassUnload;
         if (callback != NULL) {
-          (*callback)(env->jvmti_external(), jni_env, jt, jk);
+          (*callback)(env->jvmti_external(), jem.jni_env(), name);
         }
-
-        assert(real_thread->thread_state() == _thread_in_native,
-               "JavaThread should be in native");
-        real_thread->set_thread_state(prev_state);
-
-        JNIHandles::destroy_local(jk);
-        JNIHandles::destroy_local(jt);
       }
     }
   }
@@ -1485,11 +1477,11 @@ void JvmtiExport::post_thread_end(JavaThread *thread) {
 }
 
 
-void JvmtiExport::post_fiber_scheduled(jthread thread, jobject fiber) {
+void JvmtiExport::post_fiber_scheduled(jthread thread, jobject vthread) {
   if (JvmtiEnv::get_phase() < JVMTI_PHASE_PRIMORDIAL) {
     return;
   }
-  EVT_TRIG_TRACE(JVMTI_EVENT_FIBER_SCHEDULED, ("[%p] Trg Fiber Scheduled event triggered", fiber));
+  EVT_TRIG_TRACE(JVMTI_EVENT_FIBER_SCHEDULED, ("[%p] Trg Fiber Scheduled event triggered", vthread));
 
   JavaThread *cur_thread = JavaThread::current();
   JvmtiThreadState *state = cur_thread->jvmti_thread_state();
@@ -1506,24 +1498,24 @@ void JvmtiExport::post_fiber_scheduled(jthread thread, jobject fiber) {
         if (env->phase() == JVMTI_PHASE_PRIMORDIAL) {
           continue;
         }
-        EVT_TRACE(JVMTI_EVENT_FIBER_SCHEDULED, ("[%p] Evt Fiber Scheduled event sent", fiber));
+        EVT_TRACE(JVMTI_EVENT_FIBER_SCHEDULED, ("[%p] Evt Fiber Scheduled event sent", vthread));
 
         JvmtiThreadEventMark jem(cur_thread);
         JvmtiJavaThreadEventTransition jet(cur_thread);
         jvmtiEventFiberScheduled callback = env->callbacks()->FiberScheduled;
         if (callback != NULL) {
-          (*callback)(env->jvmti_external(), jem.jni_env(), thread, fiber);
+          (*callback)(env->jvmti_external(), jem.jni_env(), thread, vthread);
         }
       }
     }
   }
 }
 
-void JvmtiExport::post_fiber_terminated(jthread thread, jobject fiber) {
+void JvmtiExport::post_fiber_terminated(jthread thread, jobject vthread) {
   if (JvmtiEnv::get_phase() < JVMTI_PHASE_PRIMORDIAL) {
     return;
   }
-  EVT_TRIG_TRACE(JVMTI_EVENT_FIBER_TERMINATED, ("[%p] Trg Fiber Terminated event triggered", fiber));
+  EVT_TRIG_TRACE(JVMTI_EVENT_FIBER_TERMINATED, ("[%p] Trg Fiber Terminated event triggered", vthread));
 
   JavaThread *cur_thread = JavaThread::current();
   JvmtiThreadState *state = cur_thread->jvmti_thread_state();
@@ -1540,24 +1532,24 @@ void JvmtiExport::post_fiber_terminated(jthread thread, jobject fiber) {
         if (env->phase() == JVMTI_PHASE_PRIMORDIAL) {
           continue;
         }
-        EVT_TRACE(JVMTI_EVENT_FIBER_TERMINATED, ("[%p] Evt Fiber Terminated event sent", fiber));
+        EVT_TRACE(JVMTI_EVENT_FIBER_TERMINATED, ("[%p] Evt Fiber Terminated event sent", vthread));
 
         JvmtiThreadEventMark jem(cur_thread);
         JvmtiJavaThreadEventTransition jet(cur_thread);
         jvmtiEventFiberTerminated callback = env->callbacks()->FiberTerminated;
         if (callback != NULL) {
-          (*callback)(env->jvmti_external(), jem.jni_env(), thread, fiber);
+          (*callback)(env->jvmti_external(), jem.jni_env(), thread, vthread);
         }
       }
     }
   }
 }
 
-void JvmtiExport::post_fiber_mount(jthread thread, jobject fiber) {
+void JvmtiExport::post_fiber_mount(jthread thread, jobject vthread) {
   if (JvmtiEnv::get_phase() < JVMTI_PHASE_PRIMORDIAL) {
     return;
   }
-  EVT_TRIG_TRACE(JVMTI_EVENT_FIBER_MOUNT, ("[%p] Trg Fiber Mount event triggered", fiber));
+  EVT_TRIG_TRACE(JVMTI_EVENT_FIBER_MOUNT, ("[%p] Trg Fiber Mount event triggered", vthread));
 
   JavaThread *cur_thread = JavaThread::current();
   JvmtiThreadState *state = cur_thread->jvmti_thread_state();
@@ -1574,24 +1566,24 @@ void JvmtiExport::post_fiber_mount(jthread thread, jobject fiber) {
         if (env->phase() == JVMTI_PHASE_PRIMORDIAL) {
           continue;
         }
-        EVT_TRACE(JVMTI_EVENT_FIBER_MOUNT, ("[%p] Evt Fiber Mount event sent", fiber));
+        EVT_TRACE(JVMTI_EVENT_FIBER_MOUNT, ("[%p] Evt Fiber Mount event sent", vthread));
 
         JvmtiThreadEventMark jem(cur_thread);
         JvmtiJavaThreadEventTransition jet(cur_thread);
         jvmtiEventFiberMount callback = env->callbacks()->FiberMount;
         if (callback != NULL) {
-          (*callback)(env->jvmti_external(), jem.jni_env(), thread, fiber);
+          (*callback)(env->jvmti_external(), jem.jni_env(), thread, vthread);
         }
       }
     }
   }
 }
 
-void JvmtiExport::post_fiber_unmount(jthread thread, jobject fiber) {
+void JvmtiExport::post_fiber_unmount(jthread thread, jobject vthread) {
   if (JvmtiEnv::get_phase() < JVMTI_PHASE_PRIMORDIAL) {
     return;
   }
-  EVT_TRIG_TRACE(JVMTI_EVENT_FIBER_UNMOUNT, ("[%p] Trg Fiber Unmount event triggered", fiber));
+  EVT_TRIG_TRACE(JVMTI_EVENT_FIBER_UNMOUNT, ("[%p] Trg Fiber Unmount event triggered", vthread));
 
   JavaThread *cur_thread = JavaThread::current();
   JvmtiThreadState *state = cur_thread->jvmti_thread_state();
@@ -1608,13 +1600,13 @@ void JvmtiExport::post_fiber_unmount(jthread thread, jobject fiber) {
         if (env->phase() == JVMTI_PHASE_PRIMORDIAL) {
           continue;
         }
-        EVT_TRACE(JVMTI_EVENT_FIBER_UNMOUNT, ("[%p] Evt Fiber Unmount event sent", fiber));
+        EVT_TRACE(JVMTI_EVENT_FIBER_UNMOUNT, ("[%p] Evt Fiber Unmount event sent", vthread));
 
         JvmtiThreadEventMark jem(cur_thread);
         JvmtiJavaThreadEventTransition jet(cur_thread);
         jvmtiEventFiberUnmount callback = env->callbacks()->FiberUnmount;
         if (callback != NULL) {
-          (*callback)(env->jvmti_external(), jem.jni_env(), thread, fiber);
+          (*callback)(env->jvmti_external(), jem.jni_env(), thread, vthread);
         }
       }
     }
@@ -2229,7 +2221,9 @@ void JvmtiExport::post_raw_field_modification(JavaThread *thread, Method* method
   address location, Klass* field_klass, Handle object, jfieldID field,
   char sig_type, jvalue *value) {
 
-  if (sig_type == 'I' || sig_type == 'Z' || sig_type == 'B' || sig_type == 'C' || sig_type == 'S') {
+  if (sig_type == JVM_SIGNATURE_INT || sig_type == JVM_SIGNATURE_BOOLEAN ||
+      sig_type == JVM_SIGNATURE_BYTE || sig_type == JVM_SIGNATURE_CHAR ||
+      sig_type == JVM_SIGNATURE_SHORT) {
     // 'I' instructions are used for byte, char, short and int.
     // determine which it really is, and convert
     fieldDescriptor fd;
@@ -2240,22 +2234,22 @@ void JvmtiExport::post_raw_field_modification(JavaThread *thread, Method* method
       // convert value from int to appropriate type
       switch (fd.field_type()) {
       case T_BOOLEAN:
-        sig_type = 'Z';
+        sig_type = JVM_SIGNATURE_BOOLEAN;
         value->i = 0; // clear it
         value->z = (jboolean)ival;
         break;
       case T_BYTE:
-        sig_type = 'B';
+        sig_type = JVM_SIGNATURE_BYTE;
         value->i = 0; // clear it
         value->b = (jbyte)ival;
         break;
       case T_CHAR:
-        sig_type = 'C';
+        sig_type = JVM_SIGNATURE_CHAR;
         value->i = 0; // clear it
         value->c = (jchar)ival;
         break;
       case T_SHORT:
-        sig_type = 'S';
+        sig_type = JVM_SIGNATURE_SHORT;
         value->i = 0; // clear it
         value->s = (jshort)ival;
         break;
@@ -2270,11 +2264,11 @@ void JvmtiExport::post_raw_field_modification(JavaThread *thread, Method* method
     }
   }
 
-  assert(sig_type != '[', "array should have sig_type == 'L'");
+  assert(sig_type != JVM_SIGNATURE_ARRAY, "array should have sig_type == 'L'");
   bool handle_created = false;
 
   // convert oop to JNI handle.
-  if (sig_type == 'L') {
+  if (sig_type == JVM_SIGNATURE_CLASS) {
     handle_created = true;
     value->l = (jobject)JNIHandles::make_local(thread, (oop)value->l);
   }
@@ -2388,7 +2382,7 @@ jvmtiCompiledMethodLoadInlineRecord* create_inline_record(nmethod* nm) {
     int stackframe = 0;
     for(ScopeDesc* sd = nm->scope_desc_at(p->real_pc(nm));sd != NULL;sd = sd->sender()) {
       // sd->method() can be NULL for stubs but not for nmethods. To be completely robust, include an assert that we should never see a null sd->method()
-      assert(sd->method() != NULL, "sd->method() cannot be null.");
+      guarantee(sd->method() != NULL, "sd->method() cannot be null.");
       record->pcinfo[scope].methods[stackframe] = sd->method()->jmethod_id();
       record->pcinfo[scope].bcis[stackframe] = sd->bci();
       stackframe++;
@@ -2399,6 +2393,7 @@ jvmtiCompiledMethodLoadInlineRecord* create_inline_record(nmethod* nm) {
 }
 
 void JvmtiExport::post_compiled_method_load(nmethod *nm) {
+  guarantee(!nm->is_unloading(), "nmethod isn't unloaded or unloading");
   if (JvmtiEnv::get_phase() < JVMTI_PHASE_PRIMORDIAL) {
     return;
   }
@@ -2479,10 +2474,9 @@ void JvmtiExport::post_dynamic_code_generated(const char *name, const void *code
     // It may not be safe to post the event from this thread.  Defer all
     // postings to the service thread so that it can perform them in a safe
     // context and in-order.
-    MutexLocker ml(Service_lock, Mutex::_no_safepoint_check_flag);
     JvmtiDeferredEvent event = JvmtiDeferredEvent::dynamic_code_generated_event(
         name, code_begin, code_end);
-    JvmtiDeferredEventQueue::enqueue(event);
+    ServiceThread::enqueue_deferred_event(&event);
   }
 }
 
@@ -2825,7 +2819,7 @@ void JvmtiExport::post_sampled_object_alloc(JavaThread *thread, oop object) {
 
 void JvmtiExport::cleanup_thread(JavaThread* thread) {
   assert(JavaThread::current() == thread, "thread is not current");
-  MutexLocker mu(JvmtiThreadState_lock);
+  MutexLocker mu(thread, JvmtiThreadState_lock);
 
   if (thread->jvmti_thread_state() != NULL) {
     // This has to happen after the thread state is removed, which is
@@ -2845,7 +2839,6 @@ void JvmtiExport::clear_detected_exception(JavaThread* thread) {
 }
 
 void JvmtiExport::oops_do(OopClosure* f) {
-  JvmtiCurrentBreakpoints::oops_do(f);
   JvmtiObjectAllocEventCollector::oops_do_for_all_threads(f);
 }
 

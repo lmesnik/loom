@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2018, 2019, Red Hat, Inc. All rights reserved.
+ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
@@ -23,6 +24,7 @@
 
 #include "precompiled.hpp"
 #include "gc/shared/barrierSet.hpp"
+#include "gc/shenandoah/shenandoahBarrierSet.hpp"
 #include "gc/shenandoah/shenandoahForwarding.hpp"
 #include "gc/shenandoah/shenandoahHeap.hpp"
 #include "gc/shenandoah/shenandoahHeuristics.hpp"
@@ -38,6 +40,7 @@
 #include "opto/movenode.hpp"
 #include "opto/narrowptrnode.hpp"
 #include "opto/rootnode.hpp"
+#include "opto/runtime.hpp"
 
 ShenandoahBarrierSetC2* ShenandoahBarrierSetC2::bsc2() {
   return reinterpret_cast<ShenandoahBarrierSetC2*>(BarrierSet::barrier_set()->barrier_set_c2());
@@ -296,8 +299,14 @@ bool ShenandoahBarrierSetC2::is_shenandoah_wb_pre_call(Node* call) {
 }
 
 bool ShenandoahBarrierSetC2::is_shenandoah_lrb_call(Node* call) {
-  return call->is_CallLeaf() &&
-          call->as_CallLeaf()->entry_point() == CAST_FROM_FN_PTR(address, ShenandoahRuntime::load_reference_barrier);
+  if (!call->is_CallLeaf()) {
+    return false;
+  }
+
+  address entry_point = call->as_CallLeaf()->entry_point();
+  return (entry_point == CAST_FROM_FN_PTR(address, ShenandoahRuntime::load_reference_barrier)) ||
+         (entry_point == CAST_FROM_FN_PTR(address, ShenandoahRuntime::load_reference_barrier_narrow)) ||
+         (entry_point == CAST_FROM_FN_PTR(address, ShenandoahRuntime::load_reference_barrier_native));
 }
 
 bool ShenandoahBarrierSetC2::is_shenandoah_marking_if(PhaseTransform *phase, Node* n) {
@@ -461,12 +470,9 @@ const TypeFunc* ShenandoahBarrierSetC2::write_ref_field_pre_entry_Type() {
 }
 
 const TypeFunc* ShenandoahBarrierSetC2::shenandoah_clone_barrier_Type() {
-  const Type **fields = TypeTuple::fields(4);
-  fields[TypeFunc::Parms+0] = TypeInstPtr::NOTNULL; // src oop
-  fields[TypeFunc::Parms+1] = TypeRawPtr::NOTNULL;  // src
-  fields[TypeFunc::Parms+2] = TypeRawPtr::NOTNULL;  // dst
-  fields[TypeFunc::Parms+3] = TypeInt::INT;         // length
-  const TypeTuple *domain = TypeTuple::make(TypeFunc::Parms+4, fields);
+  const Type **fields = TypeTuple::fields(1);
+  fields[TypeFunc::Parms+0] = TypeOopPtr::NOTNULL; // src oop
+  const TypeTuple *domain = TypeTuple::make(TypeFunc::Parms+1, fields);
 
   // create result type (range)
   fields = TypeTuple::fields(0);
@@ -530,63 +536,70 @@ Node* ShenandoahBarrierSetC2::store_at_resolved(C2Access& access, C2AccessValue&
 }
 
 Node* ShenandoahBarrierSetC2::load_at_resolved(C2Access& access, const Type* val_type) const {
-  DecoratorSet decorators = access.decorators();
+  // 1: non-reference load, no additional barrier is needed
+  if (!access.is_oop()) {
+    return BarrierSetC2::load_at_resolved(access, val_type);;
+  }
 
-  Node* adr = access.addr().node();
-  Node* obj = access.base();
-
-  bool mismatched = (decorators & C2_MISMATCHED) != 0;
-  bool unknown = (decorators & ON_UNKNOWN_OOP_REF) != 0;
-  bool on_heap = (decorators & IN_HEAP) != 0;
-  bool on_weak = (decorators & ON_WEAK_OOP_REF) != 0;
-  bool is_unordered = (decorators & MO_UNORDERED) != 0;
-  bool need_cpu_mem_bar = !is_unordered || mismatched || !on_heap;
-
-  Node* top = Compile::current()->top();
-
-  Node* offset = adr->is_AddP() ? adr->in(AddPNode::Offset) : top;
   Node* load = BarrierSetC2::load_at_resolved(access, val_type);
+  DecoratorSet decorators = access.decorators();
+  BasicType type = access.type();
 
-  if (access.is_oop()) {
-    if (ShenandoahLoadRefBarrier) {
-      load = new ShenandoahLoadReferenceBarrierNode(NULL, load, (decorators & IN_NATIVE) != 0);
-      if (access.is_parse_access()) {
-        load = static_cast<C2ParseAccess &>(access).kit()->gvn().transform(load);
-      } else {
-        load = static_cast<C2OptAccess &>(access).gvn().transform(load);
-      }
+  // 2: apply LRB if needed
+  if (ShenandoahBarrierSet::need_load_reference_barrier(decorators, type)) {
+    load = new ShenandoahLoadReferenceBarrierNode(NULL,
+                                                  load,
+                                                  ShenandoahBarrierSet::use_load_reference_barrier_native(decorators, type));
+    if (access.is_parse_access()) {
+      load = static_cast<C2ParseAccess &>(access).kit()->gvn().transform(load);
+    } else {
+      load = static_cast<C2OptAccess &>(access).gvn().transform(load);
     }
   }
 
-  // If we are reading the value of the referent field of a Reference
-  // object (either by using Unsafe directly or through reflection)
-  // then, if SATB is enabled, we need to record the referent in an
-  // SATB log buffer using the pre-barrier mechanism.
-  // Also we need to add memory barrier to prevent commoning reads
-  // from this field across safepoint since GC can change its value.
-  bool need_read_barrier = ShenandoahKeepAliveBarrier &&
-    (on_heap && (on_weak || (unknown && offset != top && obj != top)));
+  // 3: apply keep-alive barrier if needed
+  if (ShenandoahBarrierSet::need_keep_alive_barrier(decorators, type)) {
+    Node* top = Compile::current()->top();
+    Node* adr = access.addr().node();
+    Node* offset = adr->is_AddP() ? adr->in(AddPNode::Offset) : top;
+    Node* obj = access.base();
 
-  if (!access.is_oop() || !need_read_barrier) {
-    return load;
-  }
+    bool unknown = (decorators & ON_UNKNOWN_OOP_REF) != 0;
+    bool on_weak_ref = (decorators & (ON_WEAK_OOP_REF | ON_PHANTOM_OOP_REF)) != 0;
+    bool is_traversal_mode = ShenandoahHeap::heap()->is_traversal_mode();
+    bool keep_alive = (decorators & AS_NO_KEEPALIVE) == 0 || is_traversal_mode;
 
-  assert(access.is_parse_access(), "entry not supported at optimization time");
-  C2ParseAccess& parse_access = static_cast<C2ParseAccess&>(access);
-  GraphKit* kit = parse_access.kit();
+    // If we are reading the value of the referent field of a Reference
+    // object (either by using Unsafe directly or through reflection)
+    // then, if SATB is enabled, we need to record the referent in an
+    // SATB log buffer using the pre-barrier mechanism.
+    // Also we need to add memory barrier to prevent commoning reads
+    // from this field across safepoint since GC can change its value.
+    if (!on_weak_ref || (unknown && (offset == top || obj == top)) || !keep_alive) {
+      return load;
+    }
 
-  if (on_weak) {
-    // Use the pre-barrier to record the value in the referent field
-    satb_write_barrier_pre(kit, false /* do_load */,
-                           NULL /* obj */, NULL /* adr */, max_juint /* alias_idx */, NULL /* val */, NULL /* val_type */,
-                           load /* pre_val */, T_OBJECT);
-    // Add memory barrier to prevent commoning reads from this field
-    // across safepoint since GC can change its value.
-    kit->insert_mem_bar(Op_MemBarCPUOrder);
-  } else if (unknown) {
-    // We do not require a mem bar inside pre_barrier if need_mem_bar
-    // is set: the barriers would be emitted by us.
-    insert_pre_barrier(kit, obj, offset, load, !need_cpu_mem_bar);
+    assert(access.is_parse_access(), "entry not supported at optimization time");
+    C2ParseAccess& parse_access = static_cast<C2ParseAccess&>(access);
+    GraphKit* kit = parse_access.kit();
+    bool mismatched = (decorators & C2_MISMATCHED) != 0;
+    bool is_unordered = (decorators & MO_UNORDERED) != 0;
+    bool in_native = (decorators & IN_NATIVE) != 0;
+    bool need_cpu_mem_bar = !is_unordered || mismatched || in_native;
+
+    if (on_weak_ref) {
+      // Use the pre-barrier to record the value in the referent field
+      satb_write_barrier_pre(kit, false /* do_load */,
+                             NULL /* obj */, NULL /* adr */, max_juint /* alias_idx */, NULL /* val */, NULL /* val_type */,
+                             load /* pre_val */, T_OBJECT);
+      // Add memory barrier to prevent commoning reads from this field
+      // across safepoint since GC can change its value.
+      kit->insert_mem_bar(Op_MemBarCPUOrder);
+    } else if (unknown) {
+      // We do not require a mem bar inside pre_barrier if need_mem_bar
+      // is set: the barriers would be emitted by us.
+      insert_pre_barrier(kit, obj, offset, load, !need_cpu_mem_bar);
+    }
   }
 
   return load;
@@ -747,7 +760,7 @@ bool ShenandoahBarrierSetC2::optimize_loops(PhaseIdealLoop* phase, LoopOptsMode 
     return true;
   } else if (mode == LoopOptsShenandoahPostExpand) {
     assert(UseShenandoahGC, "only for shenandoah");
-    visited.Clear();
+    visited.clear();
     ShenandoahBarrierC2Support::optimize_after_expansion(visited, nstack, worklist, phase);
     return true;
   }
@@ -797,8 +810,6 @@ bool ShenandoahBarrierSetC2::clone_needs_barrier(Node* src, PhaseGVN& gvn) {
   return false;
 }
 
-#define XTOP LP64_ONLY(COMMA phase->top())
-
 void ShenandoahBarrierSetC2::clone_at_expansion(PhaseMacroExpand* phase, ArrayCopyNode* ac) const {
   Node* ctrl = ac->in(TypeFunc::Control);
   Node* mem = ac->in(TypeFunc::Memory);
@@ -812,13 +823,62 @@ void ShenandoahBarrierSetC2::clone_at_expansion(PhaseMacroExpand* phase, ArrayCo
   assert (dest->is_AddP(), "for clone the dst should be the interior ptr");
 
   if (ShenandoahCloneBarrier && clone_needs_barrier(src, phase->igvn())) {
-    Node* call = phase->make_leaf_call(ctrl, mem,
+    // Check if heap is has forwarded objects. If it does, we need to call into the special
+    // routine that would fix up source references before we can continue.
+
+    enum { _heap_stable = 1, _heap_unstable, PATH_LIMIT };
+    Node* region = new RegionNode(PATH_LIMIT);
+    Node* mem_phi = new PhiNode(region, Type::MEMORY, TypeRawPtr::BOTTOM);
+
+    Node* thread = phase->transform_later(new ThreadLocalNode());
+    Node* offset = phase->igvn().MakeConX(in_bytes(ShenandoahThreadLocalData::gc_state_offset()));
+    Node* gc_state_addr = phase->transform_later(new AddPNode(phase->C->top(), thread, offset));
+
+    uint gc_state_idx = Compile::AliasIdxRaw;
+    const TypePtr* gc_state_adr_type = NULL; // debug-mode-only argument
+    debug_only(gc_state_adr_type = phase->C->get_adr_type(gc_state_idx));
+
+    Node* gc_state    = phase->transform_later(new LoadBNode(ctrl, mem, gc_state_addr, gc_state_adr_type, TypeInt::BYTE, MemNode::unordered));
+    Node* stable_and  = phase->transform_later(new AndINode(gc_state, phase->igvn().intcon(ShenandoahHeap::HAS_FORWARDED)));
+    Node* stable_cmp  = phase->transform_later(new CmpINode(stable_and, phase->igvn().zerocon(T_INT)));
+    Node* stable_test = phase->transform_later(new BoolNode(stable_cmp, BoolTest::ne));
+
+    IfNode* stable_iff  = phase->transform_later(new IfNode(ctrl, stable_test, PROB_UNLIKELY(0.999), COUNT_UNKNOWN))->as_If();
+    Node* stable_ctrl   = phase->transform_later(new IfFalseNode(stable_iff));
+    Node* unstable_ctrl = phase->transform_later(new IfTrueNode(stable_iff));
+
+    // Heap is stable, no need to do anything additional
+    region->init_req(_heap_stable, stable_ctrl);
+    mem_phi->init_req(_heap_stable, mem);
+
+    // Heap is unstable, call into clone barrier stub
+    Node* call = phase->make_leaf_call(unstable_ctrl, mem,
                     ShenandoahBarrierSetC2::shenandoah_clone_barrier_Type(),
                     CAST_FROM_FN_PTR(address, ShenandoahRuntime::shenandoah_clone_barrier),
                     "shenandoah_clone",
                     TypeRawPtr::BOTTOM,
-                    src->in(AddPNode::Base), src, dest, length);
+                    src->in(AddPNode::Base));
     call = phase->transform_later(call);
+
+    ctrl = phase->transform_later(new ProjNode(call, TypeFunc::Control));
+    mem = phase->transform_later(new ProjNode(call, TypeFunc::Memory));
+    region->init_req(_heap_unstable, ctrl);
+    mem_phi->init_req(_heap_unstable, mem);
+
+    // Wire up the actual arraycopy stub now
+    ctrl = phase->transform_later(region);
+    mem = phase->transform_later(mem_phi);
+
+    const char* name = "arraycopy";
+    call = phase->make_leaf_call(ctrl, mem,
+                                 OptoRuntime::fast_arraycopy_Type(),
+                                 phase->basictype2arraycopy(T_LONG, NULL, NULL, true, name, true),
+                                 name, TypeRawPtr::BOTTOM,
+                                 src, dest, length
+                                 LP64_ONLY(COMMA phase->top()));
+    call = phase->transform_later(call);
+
+    // Hook up the whole thing into the graph
     phase->igvn().replace_node(ac, call);
   } else {
     BarrierSetC2::clone_at_expansion(phase, ac);

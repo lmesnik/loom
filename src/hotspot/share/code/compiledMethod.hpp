@@ -378,6 +378,9 @@ public:
   virtual void clear_inline_caches();
   void clear_ic_callsites();
 
+  // Execute nmethod barrier code, as if entering through nmethod call.
+  void run_nmethod_entry_barrier();
+
   // Verify and count cached icholder relocations.
   int  verify_icholder_relocations();
   void verify_oop_relocations();
@@ -417,8 +420,6 @@ public:
 
   bool unload_nmethod_caches(bool class_unloading_occurred);
   virtual void do_unloading(bool unloading_occurred) = 0;
-
-  bool is_on_continuation_stack();
 
   oop* get_keepalive();
   oop* set_keepalive(oop* keepalive);

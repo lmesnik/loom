@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -74,16 +74,11 @@ define_pd_global(bool, RewriteFrequentPairs, true);
 
 define_pd_global(bool, PreserveFramePointer, false);
 
-// GC Ergo Flags
-define_pd_global(size_t, CMSYoungGenPerWorker, 16*M);  // default max size of CMS young gen, per GC worker thread
-
 define_pd_global(uintx, TypeProfileLevel, 111);
 
 define_pd_global(bool, CompactStrings, true);
 
 define_pd_global(intx, InitArrayShortSize, 8*BytesPerLong);
-
-define_pd_global(bool, ThreadLocalHandshakes, true);
 
 #define ARCH_FLAGS(develop, \
                    product, \
@@ -91,8 +86,7 @@ define_pd_global(bool, ThreadLocalHandshakes, true);
                    experimental, \
                    notproduct, \
                    range, \
-                   constraint, \
-                   writeable) \
+                   constraint) \
                                                                             \
   product(intx, UseVIS, 99,                                                 \
           "Highest supported VIS instructions set on SPARC")                \

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,7 +33,6 @@
 #include "utilities/align.hpp"
 
 class BytecodeStream;
-class KlassSizeStats;
 
 // The MethodData object collects counts and other profile information
 // during zeroth-tier (interpretive) and first-tier execution.
@@ -2011,7 +2010,7 @@ private:
   MethodData(const methodHandle& method, int size, TRAPS);
 public:
   static MethodData* allocate(ClassLoaderData* loader_data, const methodHandle& method, TRAPS);
-  MethodData() : _extra_data_lock(Monitor::leaf, "MDO extra data lock") {}; // For ciMethodData
+  MethodData() : _extra_data_lock(Mutex::leaf, "MDO extra data lock") {}; // For ciMethodData
 
   bool is_methodData() const volatile { return true; }
   void initialize();
@@ -2079,10 +2078,6 @@ private:
   // parameter profiling.
   enum { no_parameters = -2, parameters_uninitialized = -1 };
   int _parameters_type_data_di;
-  int parameters_size_in_bytes() const {
-    ParametersTypeData* param = parameters_type_data();
-    return param == NULL ? 0 : param->size_in_bytes();
-  }
 
   // Beginning of the data entries
   intptr_t _data[1];
@@ -2185,9 +2180,6 @@ public:
   // My size
   int size_in_bytes() const { return _size; }
   int size() const    { return align_metadata_size(align_up(_size, BytesPerWord)/BytesPerWord); }
-#if INCLUDE_SERVICES
-  void collect_statistics(KlassSizeStats *sz) const;
-#endif
 
   int      creation_mileage() const  { return _creation_mileage; }
   void set_creation_mileage(int x)   { _creation_mileage = x; }
@@ -2244,7 +2236,7 @@ public:
     _rtm_state = (int)rstate;
   }
   void atomic_set_rtm_state(RTMState rstate) {
-    Atomic::store((int)rstate, &_rtm_state);
+    Atomic::store(&_rtm_state, (int)rstate);
   }
 
   static int rtm_state_offset_in_bytes() {
@@ -2298,6 +2290,11 @@ public:
   }
   int data_size() const {
     return _data_size;
+  }
+
+  int parameters_size_in_bytes() const {
+    ParametersTypeData* param = parameters_type_data();
+    return param == NULL ? 0 : param->size_in_bytes();
   }
 
   // Accessors
@@ -2445,7 +2442,7 @@ public:
   virtual void metaspace_pointers_do(MetaspaceClosure* iter);
   virtual MetaspaceObj::Type type() const { return MethodDataType; }
 
-  // Deallocation support - no pointer fields to deallocate
+  // Deallocation support - no metaspace pointer fields to deallocate
   void deallocate_contents(ClassLoaderData* loader_data) {}
 
   // GC support

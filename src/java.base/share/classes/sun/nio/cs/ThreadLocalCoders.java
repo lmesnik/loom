@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -59,19 +59,24 @@ public class ThreadLocalCoders {
         abstract boolean hasName(Object ob, Object name);
 
         Object forName(Object name) {
-            Object[] oa = cache.get();
-            if (oa == null) {
+            Object[] oa;
+            if (Thread.currentThread().isVirtual()) {
                 oa = new Object[size];
-                cache.set(oa);
             } else {
-                for (int i = 0; i < oa.length; i++) {
-                    Object ob = oa[i];
-                    if (ob == null)
-                        continue;
-                    if (hasName(ob, name)) {
-                        if (i > 0)
-                            moveToFront(oa, i);
-                        return ob;
+                oa = cache.get();
+                if (oa == null) {
+                    oa = new Object[size];
+                    cache.set(oa);
+                } else {
+                    for (int i = 0; i < oa.length; i++) {
+                        Object ob = oa[i];
+                        if (ob == null)
+                            continue;
+                        if (hasName(ob, name)) {
+                            if (i > 0)
+                                moveToFront(oa, i);
+                            return ob;
+                        }
                     }
                 }
             }
@@ -87,17 +92,17 @@ public class ThreadLocalCoders {
 
     private static Cache decoderCache = new Cache(CACHE_SIZE) {
             boolean hasName(Object ob, Object name) {
-                if (name instanceof String)
-                    return (((CharsetDecoder)ob).charset().name().equals(name));
                 if (name instanceof Charset)
                     return ((CharsetDecoder)ob).charset().equals(name);
+                if (name instanceof String)
+                    return (((CharsetDecoder)ob).charset().name().equals(name));
                 return false;
             }
             Object create(Object name) {
-                if (name instanceof String)
-                    return Charset.forName((String)name).newDecoder();
                 if (name instanceof Charset)
                     return ((Charset)name).newDecoder();
+                if (name instanceof String)
+                    return Charset.forName((String)name).newDecoder();
                 assert false;
                 return null;
             }
@@ -111,17 +116,17 @@ public class ThreadLocalCoders {
 
     private static Cache encoderCache = new Cache(CACHE_SIZE) {
             boolean hasName(Object ob, Object name) {
-                if (name instanceof String)
-                    return (((CharsetEncoder)ob).charset().name().equals(name));
                 if (name instanceof Charset)
                     return ((CharsetEncoder)ob).charset().equals(name);
+                if (name instanceof String)
+                    return (((CharsetEncoder)ob).charset().name().equals(name));
                 return false;
             }
             Object create(Object name) {
-                if (name instanceof String)
-                    return Charset.forName((String)name).newEncoder();
                 if (name instanceof Charset)
                     return ((Charset)name).newEncoder();
+                if (name instanceof String)
+                    return Charset.forName((String)name).newEncoder();
                 assert false;
                 return null;
             }

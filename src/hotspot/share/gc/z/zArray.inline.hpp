@@ -101,7 +101,7 @@ inline ZArrayIteratorImpl<T, parallel>::ZArrayIteratorImpl(ZArray<T>* array) :
 template <typename T, bool parallel>
 inline bool ZArrayIteratorImpl<T, parallel>::next(T* elem) {
   if (parallel) {
-    const size_t next = Atomic::add(1u, &_next) - 1u;
+    const size_t next = Atomic::add(&_next, 1u) - 1u;
     if (next < _array->size()) {
       *elem = _array->at(next);
       return true;
@@ -116,5 +116,13 @@ inline bool ZArrayIteratorImpl<T, parallel>::next(T* elem) {
   // No more elements
   return false;
 }
+
+template <typename T>
+inline ZArrayIterator<T>::ZArrayIterator(ZArray<T>* array) :
+    ZArrayIteratorImpl<T, ZARRAY_SERIAL>(array) {}
+
+template <typename T>
+inline ZArrayParallelIterator<T>::ZArrayParallelIterator(ZArray<T>* array) :
+    ZArrayIteratorImpl<T, ZARRAY_PARALLEL>(array) {}
 
 #endif // SHARE_GC_Z_ZARRAY_INLINE_HPP

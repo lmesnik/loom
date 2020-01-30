@@ -1033,13 +1033,7 @@ void PhaseMacroExpand::process_users_of_allocation(CallNode *alloc) {
         if (ctrl_proj != NULL) {
           _igvn.replace_node(ctrl_proj, init->in(TypeFunc::Control));
 #ifdef ASSERT
-          BarrierSetC2* bs = BarrierSet::barrier_set()->barrier_set_c2();
           Node* tmp = init->in(TypeFunc::Control);
-          while (bs->is_gc_barrier_node(tmp)) {
-            Node* tmp2 = bs->step_over_gc_barrier_ctrl(tmp);
-            assert(tmp != tmp2, "Must make progress");
-            tmp = tmp2;
-          }
           assert(tmp == _fallthroughcatchproj, "allocation control projection");
 #endif
         }
@@ -1399,7 +1393,7 @@ void PhaseMacroExpand::expand_allocate_common(
     // other threads.
     // Other threads include java threads and JVM internal threads
     // (for example concurrent GC threads). Current concurrent GC
-    // implementation: CMS and G1 will not scan newly created object,
+    // implementation: G1 will not scan newly created object,
     // so it's safe to skip storestore barrier when allocation does
     // not escape.
     if (!alloc->does_not_escape_thread() &&
@@ -1652,14 +1646,11 @@ PhaseMacroExpand::initialize_object(AllocateNode* alloc,
                                     Node* size_in_bytes) {
   InitializeNode* init = alloc->initialization();
   // Store the klass & mark bits
-  Node* mark_node = NULL;
-  // For now only enable fast locking for non-array types
-  if (UseBiasedLocking && (length == NULL)) {
-    mark_node = make_load(control, rawmem, klass_node, in_bytes(Klass::prototype_header_offset()), TypeRawPtr::BOTTOM, T_ADDRESS);
-  } else {
-    mark_node = makecon(TypeRawPtr::make((address)markWord::prototype().value()));
+  Node* mark_node = alloc->make_ideal_mark(&_igvn, object, control, rawmem);
+  if (!mark_node->is_Con()) {
+    transform_later(mark_node);
   }
-  rawmem = make_store(control, rawmem, object, oopDesc::mark_offset_in_bytes(), mark_node, T_ADDRESS);
+  rawmem = make_store(control, rawmem, object, oopDesc::mark_offset_in_bytes(), mark_node, TypeX_X->basic_type());
 
   rawmem = make_store(control, rawmem, object, oopDesc::klass_offset_in_bytes(), klass_node, T_METADATA);
   int header_size = alloc->minimum_header_size();  // conservatively small
@@ -2377,7 +2368,13 @@ void PhaseMacroExpand::expand_lock_node(LockNode *lock) {
   Node *memproj = transform_later(new ProjNode(call, TypeFunc::Memory));
   mem_phi->init_req(1, memproj );
   transform_later(mem_phi);
-  _igvn.replace_node(_memproj_fallthrough, mem_phi);
+
+  Node* thread = transform_later(new ThreadLocalNode());
+  Node* count = make_load(region, mem_phi, thread, in_bytes(JavaThread::held_monitor_count_offset()), TypeInt::INT, TypeInt::INT->basic_type());
+  Node* newcount = transform_later(new AddINode(count, intcon(1)));
+  Node *store = make_store(region, mem_phi, thread, in_bytes(JavaThread::held_monitor_count_offset()), newcount, T_INT);
+
+  _igvn.replace_node(_memproj_fallthrough, store);
 }
 
 //------------------------------expand_unlock_node----------------------
@@ -2446,7 +2443,12 @@ void PhaseMacroExpand::expand_unlock_node(UnlockNode *unlock) {
   mem_phi->init_req(1, memproj );
   mem_phi->init_req(2, mem);
   transform_later(mem_phi);
-  _igvn.replace_node(_memproj_fallthrough, mem_phi);
+
+  Node* count = make_load(region, mem_phi, thread, in_bytes(JavaThread::held_monitor_count_offset()), TypeInt::INT, TypeInt::INT->basic_type());
+  Node* newcount = transform_later(new SubINode(count, intcon(1)));
+  Node *store = make_store(region, mem_phi, thread, in_bytes(JavaThread::held_monitor_count_offset()), newcount, T_INT);
+
+  _igvn.replace_node(_memproj_fallthrough, store);
 }
 
 //---------------------------eliminate_macro_nodes----------------------
@@ -2536,7 +2538,7 @@ bool PhaseMacroExpand::expand_macro_nodes() {
   while (progress) {
     progress = false;
     for (int i = C->macro_count(); i > 0; i--) {
-      Node * n = C->macro_node(i-1);
+      Node* n = C->macro_node(i-1);
       bool success = false;
       debug_only(int old_macro_count = C->macro_count(););
       if (n->Opcode() == Op_LoopLimit) {
@@ -2581,7 +2583,7 @@ bool PhaseMacroExpand::expand_macro_nodes() {
         C->remove_macro_node(n);
         success = true;
       }
-      assert(success == (C->macro_count() < old_macro_count), "elimination reduces macro count");
+      assert(!success || (C->macro_count() == (old_macro_count - 1)), "elimination must have deleted one node from macro list");
       progress = progress || success;
     }
   }
@@ -2589,21 +2591,40 @@ bool PhaseMacroExpand::expand_macro_nodes() {
   // expand arraycopy "macro" nodes first
   // For ReduceBulkZeroing, we must first process all arraycopy nodes
   // before the allocate nodes are expanded.
-  int macro_idx = C->macro_count() - 1;
-  while (macro_idx >= 0) {
-    Node * n = C->macro_node(macro_idx);
+  for (int i = C->macro_count(); i > 0; i--) {
+    Node* n = C->macro_node(i-1);
     assert(n->is_macro(), "only macro nodes expected here");
     if (_igvn.type(n) == Type::TOP || (n->in(0) != NULL && n->in(0)->is_top())) {
       // node is unreachable, so don't try to expand it
       C->remove_macro_node(n);
-    } else if (n->is_ArrayCopy()){
-      int macro_count = C->macro_count();
+      continue;
+    }
+    debug_only(int old_macro_count = C->macro_count(););
+    switch (n->class_id()) {
+    case Node::Class_Lock:
+      expand_lock_node(n->as_Lock());
+      assert(C->macro_count() == (old_macro_count - 1), "expansion must have deleted one node from macro list");
+      break;
+    case Node::Class_Unlock:
+      expand_unlock_node(n->as_Unlock());
+      assert(C->macro_count() == (old_macro_count - 1), "expansion must have deleted one node from macro list");
+      break;
+    case Node::Class_ArrayCopy:
       expand_arraycopy_node(n->as_ArrayCopy());
-      assert(C->macro_count() < macro_count, "must have deleted a node from macro list");
+      assert(C->macro_count() == (old_macro_count - 1), "expansion must have deleted one node from macro list");
+      break;
     }
     if (C->failing())  return true;
-    macro_idx --;
   }
+
+  // All nodes except Allocate nodes are expanded now. There could be
+  // new optimization opportunities (such as folding newly created
+  // load from a just allocated object). Run IGVN.
+  _igvn.set_delay_transform(false);
+  _igvn.optimize();
+  if (C->failing())  return true;
+
+  _igvn.set_delay_transform(true);
 
   // expand "macro" nodes
   // nodes are removed from the macro list as they are processed
@@ -2622,12 +2643,6 @@ bool PhaseMacroExpand::expand_macro_nodes() {
       break;
     case Node::Class_AllocateArray:
       expand_allocate_array(n->as_AllocateArray());
-      break;
-    case Node::Class_Lock:
-      expand_lock_node(n->as_Lock());
-      break;
-    case Node::Class_Unlock:
-      expand_unlock_node(n->as_Unlock());
       break;
     default:
       assert(false, "unknown node type in macro list");

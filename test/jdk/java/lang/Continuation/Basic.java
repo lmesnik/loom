@@ -29,6 +29,10 @@
 *
 * @run testng/othervm -Xint -XX:-UseContinuationLazyCopy Basic
 * @run testng/othervm -Xint -XX:+UseContinuationLazyCopy Basic
+*
+* @run testng/othervm -Xcomp -XX:TieredStopAtLevel=3 -XX:CompileOnly=java/lang/Continuation,Basic -XX:-UseContinuationLazyCopy Basic
+* @run testng/othervm -Xcomp -XX:TieredStopAtLevel=3 -XX:CompileOnly=java/lang/Continuation,Basic -XX:+UseContinuationLazyCopy Basic
+*
 * @run testng/othervm -Xcomp -XX:-TieredCompilation -XX:CompileOnly=java/lang/Continuation,Basic -XX:-UseContinuationLazyCopy Basic
 * @run testng/othervm -Xcomp -XX:-TieredCompilation -XX:CompileOnly=java/lang/Continuation,Basic -XX:CompileCommand=exclude,Basic.manyArgsDriver -XX:-UseContinuationLazyCopy Basic
 * @run testng/othervm -Xcomp -XX:-TieredCompilation -XX:CompileOnly=java/lang/Continuation,Basic -XX:CompileCommand=exclude,java/lang/Continuation.enter -XX:-UseContinuationLazyCopy Basic
@@ -36,8 +40,6 @@
 * @run testng/othervm -Xcomp -XX:-TieredCompilation -XX:CompileOnly=java/lang/Continuation,Basic -XX:+UseContinuationLazyCopy Basic
 * @run testng/othervm -Xcomp -XX:-TieredCompilation -XX:CompileOnly=java/lang/Continuation,Basic -XX:+UseContinuationLazyCopy -XX:CompileCommand=exclude,Basic.manyArgsDriver Basic
 * @run testng/othervm -Xcomp -XX:-TieredCompilation -XX:CompileOnly=java/lang/Continuation,Basic -XX:+UseContinuationLazyCopy -XX:CompileCommand=exclude,java/lang/Continuation.enter Basic
-* @run testng/othervm -Xcomp -XX:TieredStopAtLevel=3 -XX:CompileOnly=java/lang/Continuation,Basic -XX:-UseContinuationLazyCopy Basic
-* @run testng/othervm -Xcomp -XX:TieredStopAtLevel=3 -XX:CompileOnly=java/lang/Continuation,Basic -XX:+UseContinuationLazyCopy Basic
 */
 
 /*
@@ -265,7 +267,6 @@ public class Basic {
             int x = 3;
             String s = "abc"; 
 
-            // TODO: test when this method is interpreted but callee is compiled.
             r += fooMany(k,
             1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
             1.0, 2.0, 3.0, 4.0, 5.0, 6.0f, 7.0f, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0f, 15.0f, 16.0f, 17.0, 18.0, 19.0, 20.0,
@@ -299,7 +300,9 @@ public class Basic {
     Object o11, Object o12, Object o13, Object o14, Object o15, Object o16, Object o17, Object o18, Object o19, Object o20) {
         double x = 9.99;
         String s = "zzz";
-        Continuation.yield(FOO);
+        for (int i=0; i<2; i++) {
+            Continuation.yield(FOO);
+        }
         long r = b+1;
         return "" + r;
     }
@@ -334,7 +337,7 @@ public class Basic {
         return Integer.parseInt(r)+1;
     }
     
-    public void testNotPinnedMonitor() {
+    private void testNotPinnedMonitor() {
         System.out.println("testNotPinnedMonitor");
         final AtomicReference<Continuation.Pinned> res = new AtomicReference<>();
         
@@ -364,7 +367,7 @@ public class Basic {
         return Integer.parseInt(r)+1;
     }
 
-    public void testPinnedNative() {
+    private void testPinnedNative() {
         System.out.println("testPinnedNative");
         final AtomicReference<Continuation.Pinned> res = new AtomicReference<>();
         
@@ -403,7 +406,7 @@ public class Basic {
         return "" + r;
     }
 
-    public void testPinnedCriticalSection() {
+    private void testPinnedCriticalSection() {
         System.out.println("testPinnedCriticalSection");
         final AtomicReference<Continuation.Pinned> res = new AtomicReference<>();
         

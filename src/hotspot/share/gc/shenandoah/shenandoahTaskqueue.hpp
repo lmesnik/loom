@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2016, 2019, Red Hat, Inc. All rights reserved.
+ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
@@ -26,6 +27,7 @@
 #include "gc/shared/owstTaskTerminator.hpp"
 #include "gc/shared/taskqueue.hpp"
 #include "memory/allocation.hpp"
+#include "runtime/atomic.hpp"
 #include "runtime/mutex.hpp"
 #include "runtime/thread.hpp"
 
@@ -304,7 +306,7 @@ T* ParallelClaimableQueueSet<T, F>::claim_next() {
     return NULL;
   }
 
-  jint index = Atomic::add(1, &_claimed_index);
+  jint index = Atomic::add(&_claimed_index, 1);
 
   if (index <= size) {
     return GenericTaskQueueSet<T, F>::queue((uint)index - 1);

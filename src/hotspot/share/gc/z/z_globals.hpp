@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,8 +36,7 @@
                    product_rw,                                              \
                    lp64_product,                                            \
                    range,                                                   \
-                   constraint,                                              \
-                   writeable)                                               \
+                   constraint)                                              \
                                                                             \
   experimental(ccstr, ZPath, NULL,                                          \
           "Filesystem path for Java heap backing storage "                  \
@@ -67,9 +66,6 @@
           "Time between statistics print outs (in seconds)")                \
           range(1, (uint)-1)                                                \
                                                                             \
-  diagnostic(bool, ZStatisticsForceTrace, false,                            \
-          "Force tracing of ZStats")                                        \
-                                                                            \
   diagnostic(bool, ZProactive, true,                                        \
           "Enable proactive GC cycles")                                     \
                                                                             \
@@ -82,13 +78,10 @@
   diagnostic(bool, ZVerifyObjects, false,                                   \
           "Verify objects")                                                 \
                                                                             \
-  diagnostic(bool, ZVerifyMarking, false,                                   \
+  diagnostic(bool, ZVerifyMarking, trueInDebug,                             \
           "Verify marking stacks")                                          \
                                                                             \
   diagnostic(bool, ZVerifyForwarding, false,                                \
-          "Verify forwarding tables")                                       \
-                                                                            \
-  develop(bool, ZVerifyLoadBarriers, false,                                 \
-          "Verify that reference loads are followed by barriers")
+          "Verify forwarding tables")
 
 #endif // SHARE_GC_Z_Z_GLOBALS_HPP

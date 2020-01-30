@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -41,6 +41,7 @@
 #include "jfr/support/jfrKlassExtension.hpp"
 #endif
 
+class RecordComponent;
 
 // An InstanceKlass is the VM level representation of a Java class.
 // It contains all information needed for at class at execution runtime.
@@ -182,6 +183,9 @@ class InstanceKlass: public Klass {
   // By always being set it makes nest-member access checks simpler.
   InstanceKlass* _nest_host;
 
+  // The contents of the Record attribute.
+  Array<RecordComponent*>* _record_components;
+
   // the source debug extension for this klass, NULL if not specified.
   // Specified as UTF-8 string without terminating zero byte in the classfile,
   // it is stored in the instanceklass as a NULL-terminated UTF-8 string
@@ -214,36 +218,39 @@ class InstanceKlass: public Klass {
   // This can be used to quickly discriminate among the four kinds of
   // InstanceKlass.
 
-  static const unsigned _misc_kind_field_size = 2;
-  static const unsigned _misc_kind_field_pos  = 0;
-  static const unsigned _misc_kind_field_mask = (1u << _misc_kind_field_size) - 1u;
+  // static const unsigned _misc_kind_field_pos  = 0;
+  static const unsigned _misc_kind_field_size = 0;
+  // static const unsigned _misc_kind_field_mask = (1u << _misc_kind_field_size) - 1u;
 
   static const unsigned _misc_kind_other        = 0; // concrete InstanceKlass
   static const unsigned _misc_kind_reference    = 1; // InstanceRefKlass
   static const unsigned _misc_kind_class_loader = 2; // InstanceClassLoaderKlass
   static const unsigned _misc_kind_mirror       = 3; // InstanceMirrorKlass
+  static const unsigned _misc_kind_stack_chunk  = 4; // InstanceStackChunk
+  static const unsigned _misc_kind_last  = _misc_kind_stack_chunk;
 
   // Start after _misc_kind field.
   enum {
-    _misc_rewritten                           = 1 << 2,  // methods rewritten.
-    _misc_has_nonstatic_fields                = 1 << 3,  // for sizing with UseCompressedOops
-    _misc_should_verify_class                 = 1 << 4,  // allow caching of preverification
-    _misc_is_unsafe_anonymous                 = 1 << 5,  // has embedded _unsafe_anonymous_host field
-    _misc_is_contended                        = 1 << 6,  // marked with contended annotation
-    _misc_has_nonstatic_concrete_methods      = 1 << 7,  // class/superclass/implemented interfaces has non-static, concrete methods
-    _misc_declares_nonstatic_concrete_methods = 1 << 8,  // directly declares non-static, concrete methods
-    _misc_has_been_redefined                  = 1 << 9,  // class has been redefined
-    _misc_has_passed_fingerprint_check        = 1 << 10, // when this class was loaded, the fingerprint computed from its
+    _misc_rewritten                           = 1 << (_misc_kind_field_size + 0),  // methods rewritten.
+    _misc_has_nonstatic_fields                = 1 << (_misc_kind_field_size + 1),  // for sizing with UseCompressedOops
+    _misc_should_verify_class                 = 1 << (_misc_kind_field_size + 2),  // allow caching of preverification
+    _misc_is_unsafe_anonymous                 = 1 << (_misc_kind_field_size + 3),  // has embedded _unsafe_anonymous_host field
+    _misc_is_contended                        = 1 << (_misc_kind_field_size + 4),  // marked with contended annotation
+    _misc_has_nonstatic_concrete_methods      = 1 << (_misc_kind_field_size + 5),  // class/superclass/implemented interfaces has non-static, concrete methods
+    _misc_declares_nonstatic_concrete_methods = 1 << (_misc_kind_field_size + 6),  // directly declares non-static, concrete methods
+    _misc_has_been_redefined                  = 1 << (_misc_kind_field_size + 7),  // class has been redefined
+    _misc_has_passed_fingerprint_check        = 1 << (_misc_kind_field_size + 8), // when this class was loaded, the fingerprint computed from its
                                                          // code source was found to be matching the value recorded by AOT.
-    _misc_is_scratch_class                    = 1 << 11, // class is the redefined scratch class
-    _misc_is_shared_boot_class                = 1 << 12, // defining class loader is boot class loader
-    _misc_is_shared_platform_class            = 1 << 13, // defining class loader is platform class loader
-    _misc_is_shared_app_class                 = 1 << 14, // defining class loader is app class loader
-    _misc_has_resolved_methods                = 1 << 15  // resolved methods table entries added for this class
+    _misc_is_scratch_class                    = 1 << (_misc_kind_field_size + 9), // class is the redefined scratch class
+    _misc_is_shared_boot_class                = 1 << (_misc_kind_field_size + 10), // defining class loader is boot class loader
+    _misc_is_shared_platform_class            = 1 << (_misc_kind_field_size + 11), // defining class loader is platform class loader
+    _misc_is_shared_app_class                 = 1 << (_misc_kind_field_size + 12), // defining class loader is app class loader
+    _misc_has_resolved_methods                = 1 << (_misc_kind_field_size + 13)  // resolved methods table entries added for this class
   };
   u2 loader_type_bits() {
     return _misc_is_shared_boot_class|_misc_is_shared_platform_class|_misc_is_shared_app_class;
   }
+  u1              _kind;
   u2              _misc_flags;
   u2              _minor_version;        // minor version number of class file
   u2              _major_version;        // major version number of class file
@@ -328,6 +335,8 @@ class InstanceKlass: public Klass {
   //
 
   friend class SystemDictionary;
+
+  static bool _disable_method_binary_search;
 
  public:
   u2 loader_type() {
@@ -446,9 +455,17 @@ class InstanceKlass: public Klass {
   jushort nest_host_index() const { return _nest_host_index; }
   void set_nest_host_index(u2 i)  { _nest_host_index = i; }
 
+  // record components
+  Array<RecordComponent*>* record_components() const { return _record_components; }
+  void set_record_components(Array<RecordComponent*>* record_components) {
+    _record_components = record_components;
+  }
+  bool is_record() const { return _record_components != NULL; }
+
 private:
   // Called to verify that k is a member of this nest - does not look at k's nest-host
   bool has_nest_member(InstanceKlass* k, TRAPS) const;
+
 public:
   // Returns nest-host class, resolving and validating it if needed
   // Returns NULL if an exception occurs during loading, or validation fails
@@ -563,6 +580,14 @@ public:
 
   bool find_local_field_from_offset(int offset, bool is_static, fieldDescriptor* fd) const;
   bool find_field_from_offset(int offset, bool is_static, fieldDescriptor* fd) const;
+
+ private:
+  inline static int quick_search(const Array<Method*>* methods, const Symbol* name);
+
+ public:
+  static void disable_method_binary_search() {
+    _disable_method_binary_search = true;
+  }
 
   // find a local method (returns NULL if not found)
   Method* find_method(const Symbol* name, const Symbol* signature) const;
@@ -779,15 +804,17 @@ public:
 private:
 
   void set_kind(unsigned kind) {
-    assert(kind <= _misc_kind_field_mask, "Invalid InstanceKlass kind");
-    unsigned fmask = _misc_kind_field_mask << _misc_kind_field_pos;
-    unsigned flags = _misc_flags & ~fmask;
-    _misc_flags = (flags | (kind << _misc_kind_field_pos));
+    // assert(kind <= _misc_kind_field_mask, "Invalid InstanceKlass kind");
+    // unsigned fmask = _misc_kind_field_mask << _misc_kind_field_pos;
+    // unsigned flags = _misc_flags & ~fmask;
+    // _misc_flags = (flags | (kind << _misc_kind_field_pos));
+    assert(kind <= _misc_kind_last, "Invalid InstanceKlass kind");
+    _kind = kind;
   }
 
   bool is_kind(unsigned desired) const {
-    unsigned kind = (_misc_flags >> _misc_kind_field_pos) & _misc_kind_field_mask;
-    return kind == desired;
+    // unsigned kind = (_misc_flags >> _misc_kind_field_pos) & _misc_kind_field_mask;
+    return _kind == desired;
   }
 
 public:
@@ -797,6 +824,7 @@ public:
   bool is_reference_instance_klass() const    { return is_kind(_misc_kind_reference); }
   bool is_mirror_instance_klass() const       { return is_kind(_misc_kind_mirror); }
   bool is_class_loader_instance_klass() const { return is_kind(_misc_kind_class_loader); }
+  bool is_stack_chunk_instance_klass() const  { return is_kind(_misc_kind_stack_chunk); }
 
 #if INCLUDE_JVMTI
 
@@ -992,7 +1020,6 @@ public:
   void process_interfaces(Thread *thread);
 
   // virtual operations from Klass
-  bool is_leaf_class() const               { return _subklass == NULL; }
   GrowableArray<Klass*>* compute_secondary_supers(int num_extra_slots,
                                                   Array<InstanceKlass*>* transitive_interfaces);
   bool can_be_primary_super_slow() const;
@@ -1045,9 +1072,6 @@ public:
                                                is_unsafe_anonymous(),
                                                has_stored_fingerprint());
   }
-#if INCLUDE_SERVICES
-  virtual void collect_statistics(KlassSizeStats *sz) const;
-#endif
 
   intptr_t* start_of_itable()   const { return (intptr_t*)start_of_vtable() + vtable_length(); }
   intptr_t* end_of_itable()     const { return start_of_itable() + itable_length(); }
@@ -1143,6 +1167,8 @@ public:
                                     const Klass* super_klass,
                                     Array<InstanceKlass*>* local_interfaces,
                                     Array<InstanceKlass*>* transitive_interfaces);
+  void static deallocate_record_components(ClassLoaderData* loader_data,
+                                           Array<RecordComponent*>* record_component);
 
   // The constant pool is on stack if any of the methods are executing or
   // referenced by handles.

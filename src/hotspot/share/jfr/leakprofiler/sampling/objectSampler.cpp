@@ -93,7 +93,7 @@ static volatile int _lock = 0;
 
 ObjectSampler* ObjectSampler::acquire() {
   assert(is_created(), "invariant");
-  while (Atomic::cmpxchg(1, &_lock, 0) == 1) {}
+  while (Atomic::cmpxchg(&_lock, 0, 1) == 1) {}
   return _instance;
 }
 
@@ -110,6 +110,9 @@ static traceid get_thread_id(JavaThread* thread) {
   }
   const JfrThreadLocal* const tl = thread->jfr_thread_local();
   assert(tl != NULL, "invariant");
+  if (tl->is_excluded()) {
+    return 0;
+  }
   if (!tl->has_thread_blob()) {
     JfrCheckpointManager::create_thread_blob(thread);
   }
@@ -203,7 +206,7 @@ void ObjectSampler::remove_dead(ObjectSample* sample) {
   assert(sample != NULL, "invariant");
   assert(sample->is_dead(), "invariant");
   ObjectSample* const previous = sample->prev();
-  // push span on to previous
+  // push span onto previous
   if (previous != NULL) {
     _priority_queue->remove(previous);
     previous->add_span(sample->span());
@@ -213,23 +216,23 @@ void ObjectSampler::remove_dead(ObjectSample* sample) {
   _list->release(sample);
 }
 
-void ObjectSampler::oops_do(BoolObjectClosure* is_alive, OopClosure* f) {
+void ObjectSampler::weak_oops_do(BoolObjectClosure* is_alive, OopClosure* f) {
   assert(is_created(), "invariant");
   assert(SafepointSynchronize::is_at_safepoint(), "invariant");
   ObjectSampler& sampler = instance();
   ObjectSample* current = sampler._list->last();
   while (current != NULL) {
-    ObjectSample* next = current->next();
-    if (!current->is_dead()) {
+    if (current->_object != NULL) {
       if (is_alive->do_object_b(current->object())) {
         // The weakly referenced object is alive, update pointer
         f->do_oop(const_cast<oop*>(current->object_addr()));
       } else {
-        current->set_dead();
+        // clear existing field to assist GC barriers
+        current->_object = NULL;
         sampler._dead_samples = true;
       }
     }
-    current = next;
+    current = current->next();
   }
   sampler._last_sweep = JfrTicks::now();
 }

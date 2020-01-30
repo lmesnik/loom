@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2019, Red Hat, Inc. All rights reserved.
+ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
@@ -27,6 +28,7 @@
 
 class ShenandoahHeap;
 class ShenandoahMarkingContext;
+class ShenandoahHeapRegionSet;
 class Thread;
 
 class ShenandoahForwardedIsAliveClosure: public BoolObjectClosure {
@@ -65,6 +67,20 @@ private:
   inline void do_oop_work(T* p);
 };
 
+class ShenandoahTraversalUpdateRefsClosure: public OopClosure {
+private:
+  ShenandoahHeap* const           _heap;
+  ShenandoahHeapRegionSet* const  _traversal_set;
+
+public:
+  inline ShenandoahTraversalUpdateRefsClosure();
+  inline void do_oop(oop* p);
+  inline void do_oop(narrowOop* p);
+private:
+  template <class T>
+  inline void do_oop_work(T* p);
+};
+
 class ShenandoahEvacuateUpdateRootsClosure: public BasicOopIterateClosure {
 private:
   ShenandoahHeap* _heap;
@@ -87,6 +103,15 @@ public:
   inline ShenandoahEvacUpdateOopStorageRootsClosure();
   inline void do_oop(oop* p);
   inline void do_oop(narrowOop* p);
+};
+
+class ShenandoahCodeBlobAndDisarmClosure: public CodeBlobToOopClosure {
+private:
+  BarrierSetNMethod* const _bs;
+
+public:
+  inline ShenandoahCodeBlobAndDisarmClosure(OopClosure* cl);
+  inline void do_code_blob(CodeBlob* cb);
 };
 
 #ifdef ASSERT

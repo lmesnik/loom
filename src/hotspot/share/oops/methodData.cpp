@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,17 +24,17 @@
 
 #include "precompiled.hpp"
 #include "classfile/systemDictionary.hpp"
+#include "compiler/compilationPolicy.hpp"
 #include "compiler/compilerOracle.hpp"
 #include "interpreter/bytecode.hpp"
 #include "interpreter/bytecodeStream.hpp"
 #include "interpreter/linkResolver.hpp"
-#include "memory/heapInspection.hpp"
 #include "memory/metaspaceClosure.hpp"
 #include "memory/resourceArea.hpp"
 #include "oops/methodData.inline.hpp"
 #include "prims/jvmtiRedefineClasses.hpp"
 #include "runtime/arguments.hpp"
-#include "runtime/compilationPolicy.hpp"
+#include "runtime/atomic.hpp"
 #include "runtime/deoptimization.hpp"
 #include "runtime/handles.inline.hpp"
 #include "runtime/orderAccess.hpp"
@@ -668,7 +668,7 @@ void ArgInfoData::print_data_on(outputStream* st, const char* extra) const {
 }
 
 int ParametersTypeData::compute_cell_count(Method* m) {
-  if (!MethodData::profile_parameters_for_method(m)) {
+  if (!MethodData::profile_parameters_for_method(methodHandle(Thread::current(), m))) {
     return 0;
   }
   int max = TypeProfileParmsLimit == -1 ? INT_MAX : TypeProfileParmsLimit;
@@ -709,7 +709,7 @@ MethodData* MethodData::allocate(ClassLoaderData* loader_data, const methodHandl
   int size = MethodData::compute_allocation_size_in_words(method);
 
   return new (loader_data, size, MetaspaceObj::MethodDataType, THREAD)
-    MethodData(method(), size, THREAD);
+    MethodData(method, size, THREAD);
 }
 
 int MethodData::bytecode_cell_count(Bytecodes::Code code) {
@@ -896,7 +896,7 @@ bool FailedSpeculation::add_failed_speculation(nmethod* nm, FailedSpeculation** 
   FailedSpeculation** cursor = failed_speculations_address;
   do {
     if (*cursor == NULL) {
-      FailedSpeculation* old_fs = Atomic::cmpxchg(fs, cursor, (FailedSpeculation*) NULL);
+      FailedSpeculation* old_fs = Atomic::cmpxchg(cursor, (FailedSpeculation*) NULL, fs);
       if (old_fs == NULL) {
         // Successfully appended fs to end of the list
         return true;
@@ -1212,7 +1212,7 @@ void MethodData::post_initialize(BytecodeStream* stream) {
 
 // Initialize the MethodData* corresponding to a given method.
 MethodData::MethodData(const methodHandle& method, int size, TRAPS)
-  : _extra_data_lock(Monitor::leaf, "MDO extra data lock"),
+  : _extra_data_lock(Mutex::leaf, "MDO extra data lock"),
     _parameters_type_data_di(parameters_uninitialized) {
   // Set the method back-pointer.
   _method = method();
@@ -1220,8 +1220,9 @@ MethodData::MethodData(const methodHandle& method, int size, TRAPS)
 }
 
 void MethodData::initialize() {
+  Thread* thread = Thread::current();
   NoSafepointVerifier no_safepoint;  // init function atomic wrt GC
-  ResourceMark rm;
+  ResourceMark rm(thread);
 
   init();
   set_creation_mileage(mileage_of(method()));
@@ -1231,7 +1232,7 @@ void MethodData::initialize() {
   int data_size = 0;
   int empty_bc_count = 0;  // number of bytecodes lacking data
   _data[0] = 0;  // apparently not set below.
-  BytecodeStream stream(method());
+  BytecodeStream stream(methodHandle(thread, method()));
   Bytecodes::Code c;
   bool needs_speculative_traps = false;
   while ((c = stream.next()) >= 0) {
@@ -1284,7 +1285,7 @@ void MethodData::initialize() {
 
   post_initialize(&stream);
 
-  assert(object_size == compute_allocation_size_in_bytes(methodHandle(_method)), "MethodData: computed size != initialized size");
+  assert(object_size == compute_allocation_size_in_bytes(methodHandle(thread, _method)), "MethodData: computed size != initialized size");
   set_size(object_size);
 }
 
@@ -1296,7 +1297,8 @@ void MethodData::init() {
 
   // Set per-method invoke- and backedge mask.
   double scale = 1.0;
-  CompilerOracle::has_option_value(_method, "CompileThresholdScaling", scale);
+  methodHandle mh(Thread::current(), _method);
+  CompilerOracle::has_option_value(mh, "CompileThresholdScaling", scale);
   _invoke_mask = right_n_bits(CompilerConfig::scaled_freq_log(Tier0InvokeNotifyFreqLog, scale)) << InvocationCounter::count_shift;
   _backedge_mask = right_n_bits(CompilerConfig::scaled_freq_log(Tier0BackedgeNotifyFreqLog, scale)) << InvocationCounter::count_shift;
 
@@ -1313,8 +1315,8 @@ void MethodData::init() {
 #if INCLUDE_RTM_OPT
   _rtm_state = NoRTM; // No RTM lock eliding by default
   if (UseRTMLocking &&
-      !CompilerOracle::has_option_string(_method, "NoRTMLockEliding")) {
-    if (CompilerOracle::has_option_string(_method, "UseRTMLockEliding") || !UseRTMDeopt) {
+      !CompilerOracle::has_option_string(mh, "NoRTMLockEliding")) {
+    if (CompilerOracle::has_option_string(mh, "UseRTMLockEliding") || !UseRTMDeopt) {
       // Generate RTM lock eliding code without abort ratio calculation code.
       _rtm_state = UseRTM;
     } else if (UseRTMDeopt) {
@@ -1413,7 +1415,7 @@ ProfileData* MethodData::bci_to_extra_data_helper(int bci, Method* m, DataLayout
 
   for (;; dp = next_extra(dp)) {
     assert(dp < end, "moved past end of extra data");
-    // No need for "OrderAccess::load_acquire" ops,
+    // No need for "Atomic::load_acquire" ops,
     // since the data structure is monotonic.
     switch(dp->tag()) {
     case DataLayout::no_tag:
@@ -1548,7 +1550,7 @@ void MethodData::print_data_on(outputStream* st) const {
   DataLayout* end   = args_data_limit();
   for (;; dp = next_extra(dp)) {
     assert(dp < end, "moved past end of extra data");
-    // No need for "OrderAccess::load_acquire" ops,
+    // No need for "Atomic::load_acquire" ops,
     // since the data structure is monotonic.
     switch(dp->tag()) {
     case DataLayout::no_tag:
@@ -1572,16 +1574,6 @@ void MethodData::print_data_on(outputStream* st) const {
     if (dp >= end) return;
   }
 }
-
-#if INCLUDE_SERVICES
-// Size Statistics
-void MethodData::collect_statistics(KlassSizeStats *sz) const {
-  int n = sz->count(this);
-  sz->_method_data_bytes += n;
-  sz->_method_all_bytes += n;
-  sz->_rw_bytes += n;
-}
-#endif // INCLUDE_SERVICES
 
 // Verification
 

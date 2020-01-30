@@ -45,8 +45,6 @@ class GenCollectedHeap : public CollectedHeap {
   friend class Generation;
   friend class DefNewGeneration;
   friend class TenuredGeneration;
-  friend class ConcurrentMarkSweepGeneration;
-  friend class CMSCollector;
   friend class GenMarkSweep;
   friend class VM_GenCollectForAllocation;
   friend class VM_GenCollectFull;
@@ -233,7 +231,9 @@ public:
   // Returns true if the reference is to an object in the reserved space
   // for the young generation.
   // Assumes the the young gen address range is less than that of the old gen.
-  bool is_in_young(oop p);
+  bool is_in_young(oop p) const;
+
+  virtual bool requires_barriers(oop obj) const { return !is_in_young(obj); }
 
 #ifdef ASSERT
   bool is_in_partial_collection(const void* p);
@@ -250,7 +250,6 @@ public:
   // Iteration functions.
   void oop_iterate(OopIterateClosure* cl);
   void object_iterate(ObjectClosure* cl);
-  void safe_object_iterate(ObjectClosure* cl);
   Space* space_containing(const void* addr) const;
 
   // A CollectedHeap is divided into a dense sequence of "blocks"; that is,
@@ -386,11 +385,6 @@ public:
                      CLDClosure* weak_cld_closure,
                      CodeBlobToOopClosure* code_roots);
 
-  // Accessor for memory state verification support
-  NOT_PRODUCT(
-    virtual size_t skip_header_HeapWords() { return 0; }
-  )
-
   virtual void gc_prologue(bool full);
   virtual void gc_epilogue(bool full);
 
@@ -464,10 +458,6 @@ private:
   HeapWord* mem_allocate_work(size_t size,
                               bool is_tlab,
                               bool* gc_overhead_limit_was_exceeded);
-
-  // Override
-  void check_for_non_bad_heap_word_value(HeapWord* addr,
-    size_t size) PRODUCT_RETURN;
 
 #if INCLUDE_SERIALGC
   // For use by mark-sweep.  As implemented, mark-sweep-compact is global

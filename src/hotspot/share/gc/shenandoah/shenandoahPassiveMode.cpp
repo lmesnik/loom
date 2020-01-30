@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2019, Red Hat, Inc. All rights reserved.
+ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
@@ -32,8 +33,8 @@ void ShenandoahPassiveMode::initialize_flags() const {
   FLAG_SET_DEFAULT(ExplicitGCInvokesConcurrent, false);
   FLAG_SET_DEFAULT(ShenandoahImplicitGCInvokesConcurrent, false);
 
-  // Passive runs with max speed, reacts on allocation failure.
-  FLAG_SET_DEFAULT(ShenandoahPacing, false);
+  // Passive runs with max speed for allocation, because GC is always STW
+  SHENANDOAH_ERGO_DISABLE_FLAG(ShenandoahPacing);
 
   // No need for evacuation reserve with Full GC, only for Degenerated GC.
   if (!ShenandoahDegeneratedGC) {

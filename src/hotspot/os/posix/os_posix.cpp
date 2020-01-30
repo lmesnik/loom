@@ -30,6 +30,8 @@
 #include "runtime/frame.inline.hpp"
 #include "runtime/interfaceSupport.inline.hpp"
 #include "services/memTracker.hpp"
+#include "runtime/atomic.hpp"
+#include "runtime/orderAccess.hpp"
 #include "utilities/align.hpp"
 #include "utilities/events.hpp"
 #include "utilities/formatBuffer.hpp"
@@ -47,6 +49,7 @@
 #include <sys/utsname.h>
 #include <time.h>
 #include <unistd.h>
+#include <utmpx.h>
 
 // Todo: provide a os::get_max_process_id() or similar. Number of processes
 // may have been configured, can be read more accurately from proc fs etc.
@@ -167,48 +170,56 @@ size_t os::lasterror(char *buf, size_t len) {
   return n;
 }
 
-bool os::is_debugger_attached() {
-  // not implemented
-  return false;
-}
-
 void os::wait_for_keypress_at_exit(void) {
   // don't do anything on posix platforms
   return;
 }
 
 int os::create_file_for_heap(const char* dir) {
+  int fd;
 
-  const char name_template[] = "/jvmheap.XXXXXX";
-
-  size_t fullname_len = strlen(dir) + strlen(name_template);
-  char *fullname = (char*)os::malloc(fullname_len + 1, mtInternal);
-  if (fullname == NULL) {
-    vm_exit_during_initialization(err_msg("Malloc failed during creation of backing file for heap (%s)", os::strerror(errno)));
+#if defined(LINUX) && defined(O_TMPFILE)
+  char* native_dir = os::strdup(dir);
+  if (native_dir == NULL) {
+    vm_exit_during_initialization(err_msg("strdup failed during creation of backing file for heap (%s)", os::strerror(errno)));
     return -1;
   }
-  int n = snprintf(fullname, fullname_len + 1, "%s%s", dir, name_template);
-  assert((size_t)n == fullname_len, "Unexpected number of characters in string");
+  os::native_path(native_dir);
+  fd = os::open(dir, O_TMPFILE | O_RDWR, S_IRUSR | S_IWUSR);
+  os::free(native_dir);
 
-  os::native_path(fullname);
+  if (fd == -1)
+#endif
+  {
+    const char name_template[] = "/jvmheap.XXXXXX";
 
-  // set the file creation mask.
-  mode_t file_mode = S_IRUSR | S_IWUSR;
+    size_t fullname_len = strlen(dir) + strlen(name_template);
+    char *fullname = (char*)os::malloc(fullname_len + 1, mtInternal);
+    if (fullname == NULL) {
+      vm_exit_during_initialization(err_msg("Malloc failed during creation of backing file for heap (%s)", os::strerror(errno)));
+      return -1;
+    }
+    int n = snprintf(fullname, fullname_len + 1, "%s%s", dir, name_template);
+    assert((size_t)n == fullname_len, "Unexpected number of characters in string");
 
-  // create a new file.
-  int fd = mkstemp(fullname);
+    os::native_path(fullname);
 
-  if (fd < 0) {
-    warning("Could not create file for heap with template %s", fullname);
+    // create a new file.
+    fd = mkstemp(fullname);
+
+    if (fd < 0) {
+      warning("Could not create file for heap with template %s", fullname);
+      os::free(fullname);
+      return -1;
+    } else {
+      // delete the name from the filesystem. When 'fd' is closed, the file (and space) will be deleted.
+      int ret = unlink(fullname);
+      assert_with_errno(ret == 0, "unlink returned error");
+    }
+
     os::free(fullname);
-    return -1;
   }
 
-  // delete the name from the filesystem. When 'fd' is closed, the file (and space) will be deleted.
-  int ret = unlink(fullname);
-  assert_with_errno(ret == 0, "unlink returned error");
-
-  os::free(fullname);
   return fd;
 }
 
@@ -373,10 +384,35 @@ struct tm* os::gmtime_pd(const time_t* clock, struct tm*  res) {
 void os::Posix::print_load_average(outputStream* st) {
   st->print("load average:");
   double loadavg[3];
-  os::loadavg(loadavg, 3);
-  st->print("%0.02f %0.02f %0.02f", loadavg[0], loadavg[1], loadavg[2]);
+  int res = os::loadavg(loadavg, 3);
+  if (res != -1) {
+    st->print("%0.02f %0.02f %0.02f", loadavg[0], loadavg[1], loadavg[2]);
+  } else {
+    st->print(" Unavailable");
+  }
   st->cr();
 }
+
+// boot/uptime information;
+// unfortunately it does not work on macOS and Linux because the utx chain has no entry
+// for reboot at least on my test machines
+void os::Posix::print_uptime_info(outputStream* st) {
+  int bootsec = -1;
+  int currsec = time(NULL);
+  struct utmpx* ent;
+  setutxent();
+  while ((ent = getutxent())) {
+    if (!strcmp("system boot", ent->ut_line)) {
+      bootsec = ent->ut_tv.tv_sec;
+      break;
+    }
+  }
+
+  if (bootsec != -1) {
+    os::print_dhm(st, "OS uptime:", (long) (currsec-bootsec));
+  }
+}
+
 
 void os::Posix::print_rlimit_info(outputStream* st) {
   st->print("rlimit:");
@@ -396,6 +432,10 @@ void os::Posix::print_rlimit_info(outputStream* st) {
 #if defined(AIX)
   st->print(", NPROC ");
   st->print("%d", sysconf(_SC_CHILD_MAX));
+  st->print(", THREADS ");
+  getrlimit(RLIMIT_THREADS, &rlim);
+  if (rlim.rlim_cur == RLIM_INFINITY) st->print("infinity");
+  else st->print(UINT64_FORMAT, uint64_t(rlim.rlim_cur));
 #elif !defined(SOLARIS)
   st->print(", NPROC ");
   getrlimit(RLIMIT_NPROC, &rlim);
@@ -412,6 +452,11 @@ void os::Posix::print_rlimit_info(outputStream* st) {
   getrlimit(RLIMIT_AS, &rlim);
   if (rlim.rlim_cur == RLIM_INFINITY) st->print("infinity");
   else st->print(UINT64_FORMAT "k", uint64_t(rlim.rlim_cur) / 1024);
+
+  st->print(", CPU ");
+  getrlimit(RLIMIT_CPU, &rlim);
+  if (rlim.rlim_cur == RLIM_INFINITY) st->print("infinity");
+  else st->print(UINT64_FORMAT, uint64_t(rlim.rlim_cur));
 
   st->print(", DATA ");
   getrlimit(RLIMIT_DATA, &rlim);
@@ -686,6 +731,9 @@ static const struct {
 #endif
   {  SIGHUP,      "SIGHUP" },
   {  SIGILL,      "SIGILL" },
+#ifdef SIGINFO
+  {  SIGINFO,     "SIGINFO" },
+#endif
   {  SIGINT,      "SIGINT" },
 #ifdef SIGIO
   {  SIGIO,       "SIGIO" },
@@ -1898,7 +1946,7 @@ void os::PlatformEvent::park() {       // AKA "down()"
   // atomically decrement _event
   for (;;) {
     v = _event;
-    if (Atomic::cmpxchg(v - 1, &_event, v) == v) break;
+    if (Atomic::cmpxchg(&_event, v, v - 1) == v) break;
   }
   guarantee(v >= 0, "invariant");
 
@@ -1938,7 +1986,7 @@ int os::PlatformEvent::park(jlong millis) {
   // atomically decrement _event
   for (;;) {
     v = _event;
-    if (Atomic::cmpxchg(v - 1, &_event, v) == v) break;
+    if (Atomic::cmpxchg(&_event, v, v - 1) == v) break;
   }
   guarantee(v >= 0, "invariant");
 
@@ -1996,7 +2044,7 @@ void os::PlatformEvent::unpark() {
   // but only in the correctly written condition checking loops of ObjectMonitor,
   // Mutex/Monitor, Thread::muxAcquire and JavaThread::sleep
 
-  if (Atomic::xchg(1, &_event) >= 0) return;
+  if (Atomic::xchg(&_event, 1) >= 0) return;
 
   int status = pthread_mutex_lock(_mutex);
   assert_status(status == 0, status, "mutex_lock");
@@ -2044,7 +2092,7 @@ void Parker::park(bool isAbsolute, jlong time) {
   // Return immediately if a permit is available.
   // We depend on Atomic::xchg() having full barrier semantics
   // since we are doing a lock-free update to _counter.
-  if (Atomic::xchg(0, &_counter) > 0) return;
+  if (Atomic::xchg(&_counter, 0) > 0) return;
 
   Thread* thread = Thread::current();
   assert(thread->is_Java_thread(), "Must be JavaThread");
@@ -2073,10 +2121,12 @@ void Parker::park(bool isAbsolute, jlong time) {
   // the ThreadBlockInVM() CTOR and DTOR may grab Threads_lock.
   ThreadBlockInVM tbivm(jt);
 
+  // Can't access interrupt state now that we are _thread_blocked. If we've
+  // been interrupted since we checked above then _counter will be > 0.
+
   // Don't wait if cannot get lock since interference arises from
-  // unparking. Also re-check interrupt before trying wait.
-  if (jt->is_interrupted(false) ||
-      pthread_mutex_trylock(_mutex) != 0) {
+  // unparking.
+  if (pthread_mutex_trylock(_mutex) != 0) {
     return;
   }
 

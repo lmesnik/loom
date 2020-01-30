@@ -101,10 +101,10 @@ import org.graalvm.compiler.options.OptionValues;
 import org.graalvm.compiler.options.OptionsParser;
 import org.graalvm.compiler.serviceprovider.GraalUnsafeAccess;
 import org.graalvm.compiler.serviceprovider.JavaVersionUtil;
-import org.graalvm.compiler.test.ModuleSupport;
+import org.graalvm.compiler.api.test.ModuleSupport;
 import jdk.internal.vm.compiler.libgraal.LibGraal;
 import jdk.internal.vm.compiler.libgraal.LibGraalScope;
-import jdk.internal.vm.compiler.libgraal.OptionsEncoder;
+import org.graalvm.util.OptionsEncoder;
 
 import jdk.vm.ci.hotspot.HotSpotCodeCacheProvider;
 import jdk.vm.ci.hotspot.HotSpotCompilationRequest;
@@ -1092,7 +1092,8 @@ public final class CompileTheWorld {
                                    "'PartialEscapeAnalysis=false PrintCompilation=true'. " +
                                    "Unless explicitly enabled with 'Inline=true' here, inlining is disabled.",
                   "MultiThreaded", "Run using multiple threads for compilation.",
-                        "Threads", "Number of threads to use for multithreaded execution. Defaults to Runtime.getRuntime().availableProcessors().");
+                        "Threads", "Number of threads to use for multithreaded execution. Defaults to Runtime.getRuntime().availableProcessors().",
+        "InvalidateInstalledCode", "Invalidate the generated code so the code cache doesn't fill up.");
         // @formatter:on
     }
 

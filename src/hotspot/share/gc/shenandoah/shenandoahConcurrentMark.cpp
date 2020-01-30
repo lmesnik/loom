@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2013, 2019, Red Hat, Inc. All rights reserved.
+ * Copyright (c) 2013, 2020, Red Hat, Inc. All rights reserved.
+ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
@@ -127,10 +128,12 @@ private:
 class ShenandoahUpdateRootsTask : public AbstractGangTask {
 private:
   ShenandoahRootUpdater*  _root_updater;
+  bool                    _check_alive;
 public:
-  ShenandoahUpdateRootsTask(ShenandoahRootUpdater* root_updater) :
+  ShenandoahUpdateRootsTask(ShenandoahRootUpdater* root_updater, bool check_alive) :
     AbstractGangTask("Shenandoah update roots task"),
-    _root_updater(root_updater) {
+    _root_updater(root_updater),
+    _check_alive(check_alive){
   }
 
   void work(uint worker_id) {
@@ -139,8 +142,13 @@ public:
 
     ShenandoahHeap* heap = ShenandoahHeap::heap();
     ShenandoahUpdateRefsClosure cl;
-    AlwaysTrueClosure always_true;
-    _root_updater->roots_do<AlwaysTrueClosure, ShenandoahUpdateRefsClosure>(worker_id, &always_true, &cl);
+    if (_check_alive) {
+      ShenandoahForwardedIsAliveClosure is_alive;
+      _root_updater->roots_do<ShenandoahForwardedIsAliveClosure, ShenandoahUpdateRefsClosure>(worker_id, &is_alive, &cl);
+    } else {
+      AlwaysTrueClosure always_true;;
+      _root_updater->roots_do<AlwaysTrueClosure, ShenandoahUpdateRefsClosure>(worker_id, &always_true, &cl);
+    }
   }
 };
 
@@ -282,6 +290,8 @@ void ShenandoahConcurrentMark::update_roots(ShenandoahPhaseTimings::Phase root_p
 
   ShenandoahGCPhase phase(root_phase);
 
+  bool check_alive = root_phase == ShenandoahPhaseTimings::degen_gc_update_roots;
+
 #if COMPILER2_OR_JVMCI
   DerivedPointerTable::clear();
 #endif
@@ -289,7 +299,7 @@ void ShenandoahConcurrentMark::update_roots(ShenandoahPhaseTimings::Phase root_p
   uint nworkers = _heap->workers()->active_workers();
 
   ShenandoahRootUpdater root_updater(nworkers, root_phase);
-  ShenandoahUpdateRootsTask update_roots(&root_updater);
+  ShenandoahUpdateRootsTask update_roots(&root_updater, check_alive);
   _heap->workers()->run_task(&update_roots);
 
 #if COMPILER2_OR_JVMCI
@@ -319,13 +329,20 @@ public:
 };
 
 void ShenandoahConcurrentMark::update_thread_roots(ShenandoahPhaseTimings::Phase root_phase) {
-  WorkGang* workers = _heap->workers();
-  bool is_par = workers->active_workers() > 1;
+  assert(ShenandoahSafepoint::is_at_shenandoah_safepoint(), "Must be at a safepoint");
+
+  ShenandoahGCPhase phase(root_phase);
+
 #if COMPILER2_OR_JVMCI
   DerivedPointerTable::clear();
 #endif
+
+  WorkGang* workers = _heap->workers();
+  bool is_par = workers->active_workers() > 1;
+
   ShenandoahUpdateThreadRootsTask task(is_par, root_phase);
   workers->run_task(&task);
+
 #if COMPILER2_OR_JVMCI
   DerivedPointerTable::update_pointers();
 #endif
@@ -434,8 +451,6 @@ void ShenandoahConcurrentMark::finish_mark_from_roots(bool full_gc) {
   if (_heap->process_references()) {
     weak_refs_work(full_gc);
   }
-
-  _heap->parallel_cleaning(full_gc);
 
   assert(task_queues()->is_empty(), "Should be empty");
   TASKQUEUE_STATS_ONLY(task_queues()->print_taskqueue_stats());

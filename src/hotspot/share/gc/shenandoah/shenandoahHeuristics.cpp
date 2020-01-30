@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2018, Red Hat, Inc. All rights reserved.
+ * Copyright (c) 2018, 2020, Red Hat, Inc. All rights reserved.
+ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
@@ -120,6 +121,9 @@ void ShenandoahHeuristics::choose_collection_set(ShenandoahCollectionSet* collec
 
   ShenandoahHeap* heap = ShenandoahHeap::heap();
 
+  // Check all pinned regions have updated status before choosing the collection set.
+  heap->assert_pinned_region_status();
+
   // Step 1. Build up the region candidates we care about, rejecting losers and accepting winners right away.
 
   size_t num_regions = heap->num_regions();
@@ -186,8 +190,9 @@ void ShenandoahHeuristics::choose_collection_set(ShenandoahCollectionSet* collec
   // given the amount of immediately reclaimable garbage. If we do, figure out the collection set.
 
   assert (immediate_garbage <= total_garbage,
-          "Cannot have more immediate garbage than total garbage: " SIZE_FORMAT "M vs " SIZE_FORMAT "M",
-          immediate_garbage / M, total_garbage / M);
+          "Cannot have more immediate garbage than total garbage: " SIZE_FORMAT "%s vs " SIZE_FORMAT "%s",
+          byte_size_in_proper_unit(immediate_garbage), proper_unit_for_byte_size(immediate_garbage),
+          byte_size_in_proper_unit(total_garbage),     proper_unit_for_byte_size(total_garbage));
 
   size_t immediate_percent = total_garbage == 0 ? 0 : (immediate_garbage * 100 / total_garbage);
 
@@ -196,12 +201,16 @@ void ShenandoahHeuristics::choose_collection_set(ShenandoahCollectionSet* collec
     collection_set->update_region_status();
 
     size_t cset_percent = total_garbage == 0 ? 0 : (collection_set->garbage() * 100 / total_garbage);
-    log_info(gc, ergo)("Collectable Garbage: " SIZE_FORMAT "M (" SIZE_FORMAT "%% of total), " SIZE_FORMAT "M CSet, " SIZE_FORMAT " CSet regions",
-                       collection_set->garbage() / M, cset_percent, collection_set->live_data() / M, collection_set->count());
+    log_info(gc, ergo)("Collectable Garbage: " SIZE_FORMAT "%s (" SIZE_FORMAT "%% of total), " SIZE_FORMAT "%s CSet, " SIZE_FORMAT " CSet regions",
+                       byte_size_in_proper_unit(collection_set->garbage()),   proper_unit_for_byte_size(collection_set->garbage()),
+                       cset_percent,
+                       byte_size_in_proper_unit(collection_set->live_data()), proper_unit_for_byte_size(collection_set->live_data()),
+                       collection_set->count());
   }
 
-  log_info(gc, ergo)("Immediate Garbage: " SIZE_FORMAT "M (" SIZE_FORMAT "%% of total), " SIZE_FORMAT " regions",
-                     immediate_garbage / M, immediate_percent, immediate_regions);
+  log_info(gc, ergo)("Immediate Garbage: " SIZE_FORMAT "%s (" SIZE_FORMAT "%% of total), " SIZE_FORMAT " regions",
+                     byte_size_in_proper_unit(immediate_garbage), proper_unit_for_byte_size(immediate_garbage),
+                     immediate_percent, immediate_regions);
 }
 
 void ShenandoahHeuristics::record_gc_start() {
@@ -236,13 +245,16 @@ bool ShenandoahHeuristics::should_start_gc() const {
     return true;
   }
 
-  double last_time_ms = (os::elapsedTime() - _last_cycle_end) * 1000;
-  bool periodic_gc = (last_time_ms > ShenandoahGuaranteedGCInterval);
-  if (periodic_gc) {
-    log_info(gc)("Trigger: Time since last GC (%.0f ms) is larger than guaranteed interval (" UINTX_FORMAT " ms)",
-                  last_time_ms, ShenandoahGuaranteedGCInterval);
+  if (ShenandoahGuaranteedGCInterval > 0) {
+    double last_time_ms = (os::elapsedTime() - _last_cycle_end) * 1000;
+    if (last_time_ms > ShenandoahGuaranteedGCInterval) {
+      log_info(gc)("Trigger: Time since last GC (%.0f ms) is larger than guaranteed interval (" UINTX_FORMAT " ms)",
+                   last_time_ms, ShenandoahGuaranteedGCInterval);
+      return true;
+    }
   }
-  return periodic_gc;
+
+  return false;
 }
 
 bool ShenandoahHeuristics::should_degenerate_cycle() {

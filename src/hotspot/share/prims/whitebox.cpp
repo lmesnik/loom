@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,6 +32,7 @@
 #include "classfile/stringTable.hpp"
 #include "classfile/symbolTable.hpp"
 #include "code/codeCache.hpp"
+#include "compiler/compilationPolicy.hpp"
 #include "compiler/methodMatcher.hpp"
 #include "compiler/directivesParser.hpp"
 #include "gc/shared/gcConfig.hpp"
@@ -58,7 +59,7 @@
 #include "prims/wbtestmethods/parserTests.hpp"
 #include "prims/whitebox.inline.hpp"
 #include "runtime/arguments.hpp"
-#include "runtime/compilationPolicy.hpp"
+#include "runtime/atomic.hpp"
 #include "runtime/deoptimization.hpp"
 #include "runtime/fieldDescriptor.inline.hpp"
 #include "runtime/flags/jvmFlag.hpp"
@@ -160,24 +161,23 @@ WB_END
 
 class WBIsKlassAliveClosure : public LockedClassesDo {
     Symbol* _name;
-    bool _found;
+    int _count;
 public:
-    WBIsKlassAliveClosure(Symbol* name) : _name(name), _found(false) {}
+    WBIsKlassAliveClosure(Symbol* name) : _name(name), _count(0) {}
 
     void do_klass(Klass* k) {
-      if (_found) return;
       Symbol* ksym = k->name();
       if (ksym->fast_compare(_name) == 0) {
-        _found = true;
+        _count++;
       }
     }
 
-    bool found() const {
-        return _found;
+    int count() const {
+        return _count;
     }
 };
 
-WB_ENTRY(jboolean, WB_IsClassAlive(JNIEnv* env, jobject target, jstring name))
+WB_ENTRY(jint, WB_CountAliveClasses(JNIEnv* env, jobject target, jstring name))
   oop h_name = JNIHandles::resolve(name);
   if (h_name == NULL) return false;
   Symbol* sym = java_lang_String::as_symbol(h_name);
@@ -186,7 +186,8 @@ WB_ENTRY(jboolean, WB_IsClassAlive(JNIEnv* env, jobject target, jstring name))
   WBIsKlassAliveClosure closure(sym);
   ClassLoaderDataGraph::classes_do(&closure);
 
-  return closure.found();
+  // Return the count of alive classes with this name.
+  return closure.count();
 WB_END
 
 WB_ENTRY(jint, WB_GetSymbolRefcount(JNIEnv* env, jobject unused, jstring name))
@@ -619,6 +620,29 @@ WB_ENTRY(jobject, WB_G1AuxiliaryMemoryUsage(JNIEnv* env))
   THROW_MSG_0(vmSymbols::java_lang_UnsupportedOperationException(), "WB_G1AuxiliaryMemoryUsage: G1 GC is not enabled");
 WB_END
 
+WB_ENTRY(jint, WB_G1ActiveMemoryNodeCount(JNIEnv* env, jobject o))
+  if (UseG1GC) {
+    G1NUMA* numa = G1NUMA::numa();
+    return (jint)numa->num_active_nodes();
+  }
+  THROW_MSG_0(vmSymbols::java_lang_UnsupportedOperationException(), "WB_G1ActiveMemoryNodeCount: G1 GC is not enabled");
+WB_END
+
+WB_ENTRY(jintArray, WB_G1MemoryNodeIds(JNIEnv* env, jobject o))
+  if (UseG1GC) {
+    G1NUMA* numa = G1NUMA::numa();
+    int num_node_ids = (int)numa->num_active_nodes();
+    const int* node_ids = numa->node_ids();
+
+    typeArrayOop result = oopFactory::new_intArray(num_node_ids, CHECK_NULL);
+    for (int i = 0; i < num_node_ids; i++) {
+      result->int_at_put(i, (jint)node_ids[i]);
+    }
+    return (jintArray) JNIHandles::make_local(env, result);
+  }
+  THROW_MSG_NULL(vmSymbols::java_lang_UnsupportedOperationException(), "WB_G1MemoryNodeIds: G1 GC is not enabled");
+WB_END
+
 class OldRegionsLivenessClosure: public HeapRegionClosure {
 
  private:
@@ -773,6 +797,21 @@ WB_ENTRY(jint, WB_NMTGetHashSize(JNIEnv* env, jobject o))
   int hash_size = MallocSiteTable::hash_buckets();
   assert(hash_size > 0, "NMT hash_size should be > 0");
   return (jint)hash_size;
+WB_END
+
+WB_ENTRY(jlong, WB_NMTNewArena(JNIEnv* env, jobject o, jlong init_size))
+  Arena* arena =  new (mtTest) Arena(mtTest, size_t(init_size));
+  return (jlong)arena;
+WB_END
+
+WB_ENTRY(void, WB_NMTFreeArena(JNIEnv* env, jobject o, jlong arena))
+  Arena* a = (Arena*)arena;
+  delete a;
+WB_END
+
+WB_ENTRY(void, WB_NMTArenaMalloc(JNIEnv* env, jobject o, jlong arena, jlong size))
+  Arena* a = (Arena*)arena;
+  a->Amalloc(size_t(size));
 WB_END
 #endif // INCLUDE_NMT
 
@@ -982,7 +1021,7 @@ bool WhiteBox::compile_method(Method* method, int comp_level, int bci, Thread* T
 
   // Compile method and check result
   nmethod* nm = CompileBroker::compile_method(mh, bci, comp_level, mh, mh->invocation_count(), CompileTask::Reason_Whitebox, THREAD);
-  MutexLocker mu(Compile_lock);
+  MutexLocker mu(THREAD, Compile_lock);
   bool is_queued = mh->queued_for_compilation();
   if ((!is_blocking && is_queued) || nm != NULL) {
     return true;
@@ -1029,7 +1068,7 @@ WB_ENTRY(jint, WB_MatchesInline(JNIEnv* env, jobject o, jobject method, jstring 
 
   methodHandle mh(THREAD, Method::checked_resolve_jmethod_id(jmid));
 
-  ResourceMark rm;
+  ResourceMark rm(THREAD);
   const char* error_msg = NULL;
   char* method_str = java_lang_String::as_utf8_string(JNIHandles::resolve_non_null(pattern));
   InlineMatcher* m = InlineMatcher::parse_inline_pattern(method_str, error_msg);
@@ -1100,18 +1139,18 @@ WB_ENTRY(void, WB_ClearMethodState(JNIEnv* env, jobject o, jobject method))
   jmethodID jmid = reflected_method_to_jmid(thread, env, method);
   CHECK_JNI_EXCEPTION(env);
   methodHandle mh(THREAD, Method::checked_resolve_jmethod_id(jmid));
-  MutexLocker mu(Compile_lock);
+  MutexLocker mu(THREAD, Compile_lock);
   MethodData* mdo = mh->method_data();
   MethodCounters* mcs = mh->method_counters();
 
   if (mdo != NULL) {
     mdo->init();
-    ResourceMark rm;
+    ResourceMark rm(THREAD);
     int arg_count = mdo->method()->size_of_parameters();
     for (int i = 0; i < arg_count; i++) {
       mdo->set_arg_modified(i, 0);
     }
-    MutexLocker mu(mdo->extra_data_lock());
+    MutexLocker mu(THREAD, mdo->extra_data_lock());
     mdo->clean_method_data(/*always_clean*/true);
   }
 
@@ -1727,23 +1766,33 @@ WB_ENTRY(jlong, WB_MetaspaceCapacityUntilGC(JNIEnv* env, jobject wb))
   return (jlong) MetaspaceGC::capacity_until_GC();
 WB_END
 
-WB_ENTRY(jboolean, WB_MetaspaceShouldConcurrentCollect(JNIEnv* env, jobject wb))
-  return MetaspaceGC::should_concurrent_collect();
-WB_END
-
 WB_ENTRY(jlong, WB_MetaspaceReserveAlignment(JNIEnv* env, jobject wb))
   return (jlong)Metaspace::reserve_alignment();
 WB_END
 
 WB_ENTRY(void, WB_AssertMatchingSafepointCalls(JNIEnv* env, jobject o, jboolean mutexSafepointValue, jboolean attemptedNoSafepointValue))
-  Monitor::SafepointCheckRequired sfpt_check_required = mutexSafepointValue ?
-                                           Monitor::_safepoint_check_always :
-                                           Monitor::_safepoint_check_never;
-  Monitor::SafepointCheckFlag sfpt_check_attempted = attemptedNoSafepointValue ?
-                                           Monitor::_no_safepoint_check_flag :
-                                           Monitor::_safepoint_check_flag;
+  Mutex::SafepointCheckRequired sfpt_check_required = mutexSafepointValue ?
+                                           Mutex::_safepoint_check_always :
+                                           Mutex::_safepoint_check_never;
+  Mutex::SafepointCheckFlag sfpt_check_attempted = attemptedNoSafepointValue ?
+                                           Mutex::_no_safepoint_check_flag :
+                                           Mutex::_safepoint_check_flag;
   MutexLocker ml(new Mutex(Mutex::leaf, "SFPT_Test_lock", true, sfpt_check_required),
                  sfpt_check_attempted);
+WB_END
+
+WB_ENTRY(void, WB_AssertSpecialLock(JNIEnv* env, jobject o, jboolean allowVMBlock, jboolean safepointCheck))
+  // Create a special lock violating condition in value
+  Mutex::SafepointCheckRequired sfpt_check_required = safepointCheck ?
+                                           Mutex::_safepoint_check_always :
+                                           Mutex::_safepoint_check_never;
+  Mutex::SafepointCheckFlag safepoint_check = safepointCheck ?
+                                           Monitor::_safepoint_check_flag :
+                                           Monitor::_no_safepoint_check_flag;
+
+  MutexLocker ml(new Mutex(Mutex::special, "SpecialTest_lock", allowVMBlock, sfpt_check_required), safepoint_check);
+  // If the lock above succeeds, try to safepoint to test the NSV implied with this special lock.
+  ThreadBlockInVM tbivm(JavaThread::current());
 WB_END
 
 WB_ENTRY(jboolean, WB_IsMonitorInflated(JNIEnv* env, jobject wb, jobject obj))
@@ -1938,6 +1987,14 @@ WB_ENTRY(jboolean, WB_IsCDSIncludedInVmBuild(JNIEnv* env))
 #endif // INCLUDE_CDS
 WB_END
 
+WB_ENTRY(jboolean, WB_isC2OrJVMCIIncludedInVmBuild(JNIEnv* env))
+#if COMPILER2_OR_JVMCI
+  return true;
+#else
+  return false;
+#endif
+WB_END
+
 WB_ENTRY(jboolean, WB_IsJavaHeapArchiveSupported(JNIEnv* env))
   return HeapShared::is_heap_object_archiving_allowed();
 WB_END
@@ -1963,7 +2020,7 @@ WB_END
 #endif // INCLUDE_CDS
 
 WB_ENTRY(jint, WB_HandshakeWalkStack(JNIEnv* env, jobject wb, jobject thread_handle, jboolean all_threads))
-  class TraceSelfClosure : public ThreadClosure {
+  class TraceSelfClosure : public HandshakeClosure {
     jint _num_threads_completed;
 
     void do_thread(Thread* th) {
@@ -1978,7 +2035,7 @@ WB_ENTRY(jint, WB_HandshakeWalkStack(JNIEnv* env, jobject wb, jobject thread_han
     }
 
   public:
-    TraceSelfClosure() : _num_threads_completed(0) {}
+    TraceSelfClosure() : HandshakeClosure("WB_TraceSelf"), _num_threads_completed(0) {}
 
     jint num_threads_completed() const { return _num_threads_completed; }
   };
@@ -2144,6 +2201,12 @@ WB_ENTRY(jint, WB_AotLibrariesCount(JNIEnv* env, jobject o))
   return result;
 WB_END
 
+WB_ENTRY(jint, WB_GetKlassMetadataSize(JNIEnv* env, jobject wb, jclass mirror))
+  Klass* k = java_lang_Class::as_Klass(JNIHandles::resolve(mirror));
+  // Return size in bytes.
+  return k->size() * wordSize;
+WB_END
+
 #define CC (char*)
 
 static JNINativeMethod methods[] = {
@@ -2156,7 +2219,7 @@ static JNINativeMethod methods[] = {
   {CC"getVMLargePageSize",               CC"()J",                   (void*)&WB_GetVMLargePageSize},
   {CC"getHeapSpaceAlignment",            CC"()J",                   (void*)&WB_GetHeapSpaceAlignment},
   {CC"getHeapAlignment",                 CC"()J",                   (void*)&WB_GetHeapAlignment},
-  {CC"isClassAlive0",                    CC"(Ljava/lang/String;)Z", (void*)&WB_IsClassAlive      },
+  {CC"countAliveClasses0",               CC"(Ljava/lang/String;)I", (void*)&WB_CountAliveClasses },
   {CC"getSymbolRefcount",                CC"(Ljava/lang/String;)I", (void*)&WB_GetSymbolRefcount },
   {CC"parseCommandLine0",
       CC"(Ljava/lang/String;C[Lsun/hotspot/parser/DiagnosticCommand;)[Ljava/lang/Object;",
@@ -2186,6 +2249,8 @@ static JNINativeMethod methods[] = {
   {CC"g1StartConcMarkCycle",       CC"()Z",           (void*)&WB_G1StartMarkCycle  },
   {CC"g1AuxiliaryMemoryUsage", CC"()Ljava/lang/management/MemoryUsage;",
                                                       (void*)&WB_G1AuxiliaryMemoryUsage  },
+  {CC"g1ActiveMemoryNodeCount", CC"()I",              (void*)&WB_G1ActiveMemoryNodeCount },
+  {CC"g1MemoryNodeIds",    CC"()[I",                  (void*)&WB_G1MemoryNodeIds },
   {CC"g1GetMixedGCInfo",   CC"(I)[J",                 (void*)&WB_G1GetMixedGCInfo },
 #endif // INCLUDE_G1GC
 #if INCLUDE_G1GC || INCLUDE_PARALLELGC
@@ -2210,6 +2275,9 @@ static JNINativeMethod methods[] = {
   {CC"NMTReleaseMemory",    CC"(JJ)V",                (void*)&WB_NMTReleaseMemory   },
   {CC"NMTChangeTrackingLevel", CC"()Z",               (void*)&WB_NMTChangeTrackingLevel},
   {CC"NMTGetHashSize",      CC"()I",                  (void*)&WB_NMTGetHashSize     },
+  {CC"NMTNewArena",         CC"(J)J",                 (void*)&WB_NMTNewArena        },
+  {CC"NMTFreeArena",        CC"(J)V",                 (void*)&WB_NMTFreeArena       },
+  {CC"NMTArenaMalloc",      CC"(JJ)V",                (void*)&WB_NMTArenaMalloc     },
 #endif // INCLUDE_NMT
   {CC"deoptimizeFrames",   CC"(Z)I",                  (void*)&WB_DeoptimizeFrames  },
   {CC"deoptimizeAll",      CC"()V",                   (void*)&WB_DeoptimizeAll     },
@@ -2296,7 +2364,6 @@ static JNINativeMethod methods[] = {
      CC"(Ljava/lang/ClassLoader;JJ)V",                (void*)&WB_FreeMetaspace },
   {CC"incMetaspaceCapacityUntilGC", CC"(J)J",         (void*)&WB_IncMetaspaceCapacityUntilGC },
   {CC"metaspaceCapacityUntilGC", CC"()J",             (void*)&WB_MetaspaceCapacityUntilGC },
-  {CC"metaspaceShouldConcurrentCollect", CC"()Z",     (void*)&WB_MetaspaceShouldConcurrentCollect },
   {CC"metaspaceReserveAlignment", CC"()J",            (void*)&WB_MetaspaceReserveAlignment },
   {CC"getCPUFeatures",     CC"()Ljava/lang/String;",  (void*)&WB_GetCPUFeatures     },
   {CC"getNMethod0",         CC"(Ljava/lang/reflect/Executable;Z)[Ljava/lang/Object;",
@@ -2323,6 +2390,7 @@ static JNINativeMethod methods[] = {
   {CC"AddModuleExportsToAll", CC"(Ljava/lang/Object;Ljava/lang/String;)V",
                                                       (void*)&WB_AddModuleExportsToAll },
   {CC"assertMatchingSafepointCalls", CC"(ZZ)V",       (void*)&WB_AssertMatchingSafepointCalls },
+  {CC"assertSpecialLock",  CC"(ZZ)V",                 (void*)&WB_AssertSpecialLock },
   {CC"isMonitorInflated0", CC"(Ljava/lang/Object;)Z", (void*)&WB_IsMonitorInflated  },
   {CC"forceSafepoint",     CC"()V",                   (void*)&WB_ForceSafepoint     },
   {CC"getConstantPool0",   CC"(Ljava/lang/Class;)J",  (void*)&WB_GetConstantPool    },
@@ -2358,6 +2426,7 @@ static JNINativeMethod methods[] = {
   {CC"areOpenArchiveHeapObjectsMapped",   CC"()Z",    (void*)&WB_AreOpenArchiveHeapObjectsMapped},
   {CC"isCDSIncludedInVmBuild",            CC"()Z",    (void*)&WB_IsCDSIncludedInVmBuild },
   {CC"isJFRIncludedInVmBuild",            CC"()Z",    (void*)&WB_IsJFRIncludedInVmBuild },
+  {CC"isC2OrJVMCIIncludedInVmBuild",      CC"()Z",    (void*)&WB_isC2OrJVMCIIncludedInVmBuild },
   {CC"isJavaHeapArchiveSupported",        CC"()Z",    (void*)&WB_IsJavaHeapArchiveSupported },
   {CC"cdsMemoryMappingFailed",            CC"()Z",    (void*)&WB_CDSMemoryMappingFailed },
 
@@ -2380,6 +2449,7 @@ static JNINativeMethod methods[] = {
   {CC"resolvedMethodItemsCount",  CC"()J",            (void*)&WB_ResolvedMethodItemsCount },
   {CC"protectionDomainRemovedCount",   CC"()I",       (void*)&WB_ProtectionDomainRemovedCount },
   {CC"aotLibrariesCount", CC"()I",                    (void*)&WB_AotLibrariesCount },
+  {CC"getKlassMetadataSize", CC"(Ljava/lang/Class;)I",(void*)&WB_GetKlassMetadataSize},
 };
 
 

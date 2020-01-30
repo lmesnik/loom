@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -37,6 +37,7 @@
 #include "code/pcDesc.hpp"
 #include "code/scopeDesc.hpp"
 #include "code/vtableStubs.hpp"
+#include "compiler/compilationPolicy.hpp"
 #include "compiler/disassembler.hpp"
 #include "gc/shared/barrierSet.hpp"
 #include "gc/shared/c1/barrierSetC1.hpp"
@@ -55,7 +56,6 @@
 #include "oops/oop.inline.hpp"
 #include "runtime/atomic.hpp"
 #include "runtime/biasedLocking.hpp"
-#include "runtime/compilationPolicy.hpp"
 #include "runtime/continuation.hpp"
 #include "runtime/fieldDescriptor.inline.hpp"
 #include "runtime/frame.inline.hpp"
@@ -715,6 +715,7 @@ JRT_ENTRY_NO_ASYNC(void, Runtime1::monitorenter(JavaThread* thread, oopDesc* obj
   }
   assert(obj == lock->obj(), "must match");
   ObjectSynchronizer::enter(h_obj, lock->lock(), THREAD);
+  // thread->inc_held_monitor_count();
 JRT_END
 
 
@@ -728,6 +729,7 @@ JRT_LEAF(void, Runtime1::monitorexit(JavaThread* thread, BasicObjectLock* lock))
   oop obj = lock->obj();
   assert(oopDesc::is_oop(obj), "must be NULL or an object");
   ObjectSynchronizer::exit(obj, lock->lock(), THREAD);
+  // thread->dec_held_monitor_count();
 JRT_END
 
 // Cf. OptoRuntime::deoptimize_caller_frame
@@ -1045,7 +1047,7 @@ JRT_ENTRY(void, Runtime1::patch_code(JavaThread* thread, Runtime1::StubID stub_i
   // Now copy code back
 
   {
-    MutexLocker ml_patch (Patching_lock, Mutex::_no_safepoint_check_flag);
+    MutexLocker ml_patch (THREAD, Patching_lock, Mutex::_no_safepoint_check_flag);
     //
     // Deoptimization may have happened while we waited for the lock.
     // In that case we don't bother to do any patching we just return
@@ -1264,7 +1266,7 @@ JRT_ENTRY(void, Runtime1::patch_code(JavaThread* thread, Runtime1::StubID stub_i
   // If we are patching in a non-perm oop, make sure the nmethod
   // is on the right list.
   {
-    MutexLocker ml_code (CodeCache_lock, Mutex::_no_safepoint_check_flag);
+    MutexLocker ml_code (THREAD, CodeCache_lock, Mutex::_no_safepoint_check_flag);
     nmethod* nm = CodeCache::find_nmethod(caller_frame.pc());
     guarantee(nm != NULL, "only nmethods can contain non-perm oops");
 
@@ -1428,7 +1430,7 @@ JRT_ENTRY(void, Runtime1::predicate_failed_trap(JavaThread* thread))
   assert (nm != NULL, "no more nmethod?");
   nm->make_not_entrant();
 
-  methodHandle m(nm->method());
+  methodHandle m(thread, nm->method());
   MethodData* mdo = m->method_data();
 
   if (mdo == NULL && !HAS_PENDING_EXCEPTION) {
@@ -1449,7 +1451,7 @@ JRT_ENTRY(void, Runtime1::predicate_failed_trap(JavaThread* thread))
   if (TracePredicateFailedTraps) {
     stringStream ss1, ss2;
     vframeStream vfst(thread);
-    methodHandle inlinee = methodHandle(vfst.method());
+    Method* inlinee = vfst.method();
     inlinee->print_short_name(&ss1);
     m->print_short_name(&ss2);
     tty->print_cr("Predicate failed trap in method %s at bci %d inlined in %s at pc " INTPTR_FORMAT, ss1.as_string(), vfst.bci(), ss2.as_string(), p2i(caller_frame.pc()));

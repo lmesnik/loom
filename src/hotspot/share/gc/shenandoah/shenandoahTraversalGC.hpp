@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2018, Red Hat, Inc. All rights reserved.
+ * Copyright (c) 2018, 2019, Red Hat, Inc. All rights reserved.
+ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
@@ -48,7 +49,7 @@ public:
   void concurrent_traversal_collection();
   void final_traversal_collection();
 
-  template <class T, bool STRING_DEDUP, bool DEGEN>
+  template <class T, bool STRING_DEDUP, bool DEGEN, bool ATOMIC_UPDATE>
   inline void process_oop(T* p, Thread* thread, ShenandoahObjToScanQueue* queue, ShenandoahMarkingContext* const mark_context);
 
   bool check_and_handle_cancelled_gc(ShenandoahTaskTerminator* terminator, bool sts_yield);
@@ -68,6 +69,7 @@ private:
   void weak_refs_work_doit();
 
   void fixup_roots();
+  void verify_roots_after_gc();
 };
 
 #endif // SHARE_GC_SHENANDOAH_SHENANDOAHTRAVERSALGC_HPP

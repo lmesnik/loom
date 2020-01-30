@@ -48,7 +48,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
 
-import jdk.internal.misc.Strands;
 import sun.net.NetHooks;
 import sun.net.ext.ExtendedSocketOptions;
 
@@ -277,7 +276,7 @@ class ServerSocketChannelImpl
             boolean blocking = isBlocking();
             try {
                 begin(blocking);
-                lockedConfigureNonBlockingIfFiber();
+                lockedConfigureNonBlockingIfNeeded();
                 n = Net.accept(this.fd, newfd, isaa);
                 if (blocking) {
                     while (IOStatus.okayToRetry(n) && isOpen()) {
@@ -337,8 +336,8 @@ class ServerSocketChannelImpl
                         n = Net.accept(fd, newfd, isaa);
                     }
                 } finally {
-                    // restore socket to blocking mode
-                    lockedConfigureBlocking(true);
+                    // restore socket to blocking mode (if channel is open)
+                    tryLockedConfigureBlocking(true);
                 }
             } finally {
                 end(true, n > 0);
@@ -381,13 +380,13 @@ class ServerSocketChannelImpl
     }
 
     /**
-     * Adjust the blocking mode while holding acceptLock.
+     * Adjusts the blocking mode.
      */
     private void lockedConfigureBlocking(boolean block) throws IOException {
         assert acceptLock.isHeldByCurrentThread();
         synchronized (stateLock) {
             ensureOpen();
-            // do nothing if fiber has forced the socket to be non-blocking
+            // do nothing if virtual thread has forced the socket to be non-blocking
             if (!nonBlocking) {
                 IOUtil.configureBlocking(fd, block);
             }
@@ -395,12 +394,29 @@ class ServerSocketChannelImpl
     }
 
     /**
-     * Ensures that the socket is configured non-blocking when the current
-     * strand is a fiber.
+     * Attempts to adjusts the blocking mode if the channel is open.
+     * @return {@code true} if the blocking mode was adjusted
      */
-    private void lockedConfigureNonBlockingIfFiber() throws IOException {
+    private boolean tryLockedConfigureBlocking(boolean block) throws IOException {
         assert acceptLock.isHeldByCurrentThread();
-        if (!nonBlocking && (Strands.currentStrand() instanceof Fiber)) {
+        synchronized (stateLock) {
+            // do nothing if virtual thread has forced the socket to be non-blocking
+            if (!nonBlocking && isOpen()) {
+                IOUtil.configureBlocking(fd, block);
+                return true;
+            } else {
+                return false;
+            }
+        }
+    }
+
+    /**
+     * Ensures that the socket is configured non-blocking when on a virtual
+     * thread.
+     */
+    private void lockedConfigureNonBlockingIfNeeded() throws IOException {
+        assert acceptLock.isHeldByCurrentThread();
+        if (!nonBlocking && (Thread.currentThread().isVirtual())) {
             synchronized (stateLock) {
                 ensureOpen();
                 IOUtil.configureBlocking(fd, false);
@@ -449,7 +465,7 @@ class ServerSocketChannelImpl
             if (!tryClose()) {
                 long th = thread;
                 if (th != 0) {
-                    if (NativeThread.isFiber(th))
+                    if (NativeThread.isVirtualThread(th))
                         Poller.stopPoll(fdVal);
                     nd.preClose(fd);
                     if (NativeThread.isKernelThread(th))

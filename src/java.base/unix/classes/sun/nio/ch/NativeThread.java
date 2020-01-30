@@ -36,20 +36,16 @@ package sun.nio.ch;
 // On systems that do not require this type of signalling, the current() method
 // always returns -1 and the signal(long) method has no effect.
 
-
-import jdk.internal.misc.Strands;
-
 public class NativeThread {
-    private static final long FIBER_ID = -1L;
+    private static final long VIRTUAL_THREAD_ID = -1L;
 
     /**
      * Returns a token representing the current thread or -1 if called in the
-     * context of a Fiber.
+     * context of a virtual thread
      */
     public static long current() {
-        Object s = Strands.currentStrand();
-        if (s instanceof Fiber) {
-            return FIBER_ID;
+        if (Thread.currentThread().isVirtual()) {
+            return VIRTUAL_THREAD_ID;
         } else {
             return current0();
         }
@@ -68,23 +64,23 @@ public class NativeThread {
      * @throws IllegalArgumentException if tid is not a token to a kernel thread
      */
     public static void signal(long tid) {
-        if (tid == 0 || tid == FIBER_ID)
+        if (tid == 0 || tid == VIRTUAL_THREAD_ID)
             throw new IllegalArgumentException();
         signal0(tid);
     }
 
     /**
-     * Returns true if the token presents a fiber rather than a thread
+     * Returns true if the token presents a virtual thread
      */
-    static boolean isFiber(long tid) {
-        return (tid == FIBER_ID);
+    static boolean isVirtualThread(long tid) {
+        return (tid == VIRTUAL_THREAD_ID);
     }
 
     /**
      * Returns true if the token presents a kernel thread
      */
     static boolean isKernelThread(long tid) {
-        return (tid != 0 && tid != FIBER_ID);
+        return (tid != 0 && tid != VIRTUAL_THREAD_ID);
     }
 
     // Returns an opaque token representing the native thread underlying the

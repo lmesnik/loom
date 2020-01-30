@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -809,14 +809,11 @@ JvmtiEnv::SetVerboseFlag(jvmtiVerboseFlag flag, jboolean value) {
     LogConfiguration::configure_stdout(level, false, LOG_TAGS(class, load));
     break;
   case JVMTI_VERBOSE_GC:
-    if (value == 0) {
-      LogConfiguration::configure_stdout(LogLevel::Off, true, LOG_TAGS(gc));
-    } else {
-      LogConfiguration::configure_stdout(LogLevel::Info, true, LOG_TAGS(gc));
-    }
+    LogConfiguration::configure_stdout(level, true, LOG_TAGS(gc));
     break;
   case JVMTI_VERBOSE_JNI:
-    PrintJNIResolving = value != 0;
+    level = value == 0 ? LogLevel::Off : LogLevel::Debug;
+    LogConfiguration::configure_stdout(level, true, LOG_TAGS(jni, resolve));
     break;
   default:
     return JVMTI_ERROR_ILLEGAL_ARGUMENT;
@@ -833,16 +830,16 @@ JvmtiEnv::GetJLocationFormat(jvmtiJlocationFormat* format_ptr) {
 } /* end GetJLocationFormat */
 
   //
-  // Functions supporting Fibers
+  // Functions supporting virtual threads
   //
 
 // object - pre-checked for NULL
-// is_fiber_ptr - pre-checked for NULL
+// is_vthread_ptr - pre-checked for NULL
 jvmtiError
-JvmtiEnv::IsFiber(jobject object, jboolean* is_fiber_ptr) {
-  oop obj = JNIHandles::resolve_external_guard(object);
+JvmtiEnv::IsFiber(jthread thread, jboolean* is_vthread_ptr) {
+  oop thread_obj = JNIHandles::resolve_external_guard(thread);
 
-  *is_fiber_ptr = java_lang_Fiber::is_instance(obj);
+  *is_vthread_ptr = java_lang_VirtualThread::is_instance(thread_obj);
   return JVMTI_ERROR_NONE;
 } /* end IsFiber */
 
@@ -850,10 +847,10 @@ JvmtiEnv::IsFiber(jobject object, jboolean* is_fiber_ptr) {
 // java_thread - pre-checked
 // fiber_ptr - pre-checked for NULL
 jvmtiError
-JvmtiEnv::GetThreadFiber(JavaThread* java_thread, jobject* fiber_ptr) {
+JvmtiEnv::GetThreadFiber(JavaThread* java_thread, jthread* vthread_ptr) {
   JavaThread* current_thread  = JavaThread::current();
   ResourceMark rm(current_thread);
-  oop fiber_oop = NULL;
+  oop vthread_oop = NULL;
   uint32_t debug_bits = 0;
 
   JvmtiThreadState *state = JvmtiThreadState::state_for(java_thread);
@@ -863,219 +860,27 @@ JvmtiEnv::GetThreadFiber(JavaThread* java_thread, jobject* fiber_ptr) {
   if (!java_thread->is_thread_fully_suspended(true, &debug_bits)) {
     return JVMTI_ERROR_THREAD_NOT_SUSPENDED;
   }
-  fiber_oop = java_lang_Thread::fiber(java_thread->threadObj());
-  *fiber_ptr = JNIHandles::make_local(current_thread, fiber_oop);
+  vthread_oop = java_lang_Thread::vthread(java_thread->threadObj());
+  *vthread_ptr = (jthread)JNIHandles::make_local(current_thread, vthread_oop);
   return JVMTI_ERROR_NONE;
 } /* end GetThreadFiber */
 
 // thread_ptr - pre-checked for NULL
 jvmtiError
-JvmtiEnv::GetFiberThread(jobject fiber, jthread* thread_ptr) {
+JvmtiEnv::GetFiberThread(jthread vthread, jthread* thread_ptr) {
   JavaThread* current_thread  = JavaThread::current();
   HandleMark hm(current_thread);
-  oop fiber_obj = JNIHandles::resolve_external_guard(fiber);
+  oop vthread_obj = JNIHandles::resolve_external_guard(vthread);
 
-  if (!java_lang_Fiber::is_instance(fiber_obj)) {
-    return JVMTI_ERROR_INVALID_FIBER;
+  if (!java_lang_VirtualThread::is_instance(vthread_obj)) {
+    return JVMTI_ERROR_INVALID_THREAD;
   }
 
-  VM_FiberGetThread op(current_thread, Handle(current_thread, fiber_obj), thread_ptr);
+  VM_VirtualThreadGetThread op(current_thread, Handle(current_thread, vthread_obj), thread_ptr);
   VMThread::execute(&op);
 
   return op.result();
 } /* end GetFiberThread */
-
-// max_frame_count - pre-checked to be greater than or equal to 0
-// frame_buffer - pre-checked for NULL
-// count_ptr - pre-checked for NULL
-jvmtiError
-JvmtiEnv::GetFiberStackTrace(jobject fiber, jint start_depth, jint max_frame_count, jvmtiFrameInfo* frame_buffer, jint* count_ptr) {
-  JavaThread* current_thread = JavaThread::current();
-  HandleMark hm(current_thread);
-  oop fiber_obj = JNIHandles::resolve_external_guard(fiber);
-
-  if (!java_lang_Fiber::is_instance(fiber_obj)) {
-    return JVMTI_ERROR_INVALID_FIBER;
-  }
-
-  VM_FiberGetStackTrace op(this, Handle(current_thread, fiber_obj),
-                           start_depth, max_frame_count, frame_buffer, count_ptr);
-  VMThread::execute(&op);
-
-  return op.result();
-} /* end GetFiberStackTrace */
-
-// count_ptr - pre-checked for NULL
-jvmtiError
-JvmtiEnv::GetFiberFrameCount(jobject fiber, jint* count_ptr) {
-  JavaThread* current_thread = JavaThread::current();
-  HandleMark hm(current_thread);
-  oop fiber_obj = JNIHandles::resolve_external_guard(fiber);
-
-  if (!java_lang_Fiber::is_instance(fiber_obj)) {
-    return JVMTI_ERROR_INVALID_FIBER;
-  }
-
-  VM_FiberGetFrameCount op(this, Handle(current_thread, fiber_obj), count_ptr);
-  VMThread::execute(&op);
-
-  return op.result();
-} /* end GetFiberFrameCount */
-
-// depth - pre-checked as non-negative
-// method_ptr - pre-checked for NULL
-// location_ptr - pre-checked for NULL
-jvmtiError
-JvmtiEnv::GetFiberFrameLocation(jobject fiber, jint depth, jmethodID* method_ptr, jlocation* location_ptr) {
-  JavaThread* current_thread  = JavaThread::current();
-  HandleMark hm(current_thread);
-  oop fiber_obj = JNIHandles::resolve_external_guard(fiber);
-
-  if (!java_lang_Fiber::is_instance(fiber_obj)) {
-    return JVMTI_ERROR_INVALID_FIBER;
-  }
-
-  VM_FiberGetFrameLocation op(this, Handle(current_thread, fiber_obj), depth, method_ptr, location_ptr);
-  VMThread::execute(&op);
-
-  return op.result();
-} /* end GetFiberFrameLocation */
-
-// depth - pre-checked as non-negative
-// value_ptr - pre-checked for NULL
-jvmtiError
-JvmtiEnv::GetFiberLocalObject(jobject fiber, jint depth, jint slot, jobject* value_ptr) {
-  JavaThread* current_thread = JavaThread::current();
-  // rm object is created to clean up the javaVFrame created in
-  // doit_prologue(), but after doit() is finished with it.
-  ResourceMark rm(current_thread);
-  HandleMark hm(current_thread);
-  oop fiber_obj = JNIHandles::resolve_external_guard(fiber);
-
-  if (!java_lang_Fiber::is_instance(fiber_obj)) {
-    return JVMTI_ERROR_INVALID_FIBER;
-  }
-  VM_FiberGetOrSetLocal op(this, Handle(current_thread, fiber_obj),
-                           current_thread, depth, slot);
-  VMThread::execute(&op);
-
-  jvmtiError err = op.result();
-  if (err == JVMTI_ERROR_NONE) {
-    *value_ptr = op.value().l;
-  }
-  return err;
-} /* end GetFiberLocalObject */
-
-// depth - pre-checked as non-negative
-// value_ptr - pre-checked for NULL
-jvmtiError
-JvmtiEnv::GetFiberLocalInstance(jobject fiber, jint depth, jobject* value_ptr){
-  JavaThread* current_thread = JavaThread::current();
-  // rm object is created to clean up the javaVFrame created in
-  // doit_prologue(), but after doit() is finished with it.
-  ResourceMark rm(current_thread);
-  HandleMark hm(current_thread);
-  oop fiber_obj = JNIHandles::resolve_external_guard(fiber);
-
-  if (!java_lang_Fiber::is_instance(fiber_obj)) {
-    return JVMTI_ERROR_INVALID_FIBER;
-  }
-
-  VM_FiberGetReceiver op(this, Handle(current_thread, fiber_obj),
-                         current_thread, depth);
-  VMThread::execute(&op);
-
-  jvmtiError err = op.result();
-  if (err == JVMTI_ERROR_NONE) {
-    *value_ptr = op.value().l;
-  }
-  return err;
-} /* end GetFiberLocalInstance */
-
-// depth - pre-checked as non-negative
-// value_ptr - pre-checked for NULL
-jvmtiError
-JvmtiEnv::GetFiberLocalInt(jobject fiber, jint depth, jint slot, jint* value_ptr) {
-  JavaThread* current_thread = JavaThread::current();
-  // rm object is created to clean up the javaVFrame created in
-  // doit_prologue(), but after doit() is finished with it.
-  ResourceMark rm(current_thread);
-  HandleMark hm(current_thread);
-  oop fiber_obj = JNIHandles::resolve_external_guard(fiber);
-
-  if (!java_lang_Fiber::is_instance(fiber_obj)) {
-    return JVMTI_ERROR_INVALID_FIBER;
-  }
-
-  VM_FiberGetOrSetLocal op(this, Handle(current_thread, fiber_obj), depth, slot, T_INT);
-  VMThread::execute(&op);
-  *value_ptr = op.value().i;
-  return op.result();
-} /* end GetFiberLocalInt */
-
-// depth - pre-checked as non-negative
-// value_ptr - pre-checked for NULL
-jvmtiError
-JvmtiEnv::GetFiberLocalLong(jobject fiber, jint depth, jint slot, jlong* value_ptr) {
-  JavaThread* current_thread = JavaThread::current();
-  // rm object is created to clean up the javaVFrame created in
-  // doit_prologue(), but after doit() is finished with it.
-  ResourceMark rm(current_thread);
-  HandleMark hm(current_thread);
-  oop fiber_obj = JNIHandles::resolve_external_guard(fiber);
-
-  if (!java_lang_Fiber::is_instance(fiber_obj)) {
-    return JVMTI_ERROR_INVALID_FIBER;
-  }
-
-  VM_FiberGetOrSetLocal op(this, Handle(current_thread, fiber_obj), depth, slot, T_LONG);
-  VMThread::execute(&op);
-  *value_ptr = op.value().j;
-  return op.result();
-} /* end GetFiberLocalLong */
-
-// depth - pre-checked as non-negative
-// value_ptr - pre-checked for NULL
-jvmtiError
-JvmtiEnv::GetFiberLocalFloat(jobject fiber, jint depth, jint slot, jfloat* value_ptr) {
-  JavaThread* current_thread = JavaThread::current();
-  // rm object is created to clean up the javaVFrame created in
-  // doit_prologue(), but after doit() is finished with it.
-  ResourceMark rm(current_thread);
-  HandleMark hm(current_thread);
-  oop fiber_obj = JNIHandles::resolve_external_guard(fiber);
-
-  if (!java_lang_Fiber::is_instance(fiber_obj)) {
-    return JVMTI_ERROR_INVALID_FIBER;
-  }
-
-  VM_FiberGetOrSetLocal op(this, Handle(current_thread, fiber_obj), depth, slot, T_FLOAT);
-  VMThread::execute(&op);
-  *value_ptr = op.value().f;
-  return op.result();
-} /* end GetFiberLocalFloat */
-
-// depth - pre-checked as non-negative
-// value_ptr - pre-checked for NULL
-jvmtiError
-JvmtiEnv::GetFiberLocalDouble(jobject fiber, jint depth, jint slot, jdouble* value_ptr) {
-  JavaThread* current_thread = JavaThread::current();
-  // rm object is created to clean up the javaVFrame created in
-  // doit_prologue(), but after doit() is finished with it.
-  ResourceMark rm(current_thread);
-  HandleMark hm(current_thread);
-  oop fiber_obj = JNIHandles::resolve_external_guard(fiber);
-
-  if (!java_lang_Fiber::is_instance(fiber_obj)) {
-    return JVMTI_ERROR_INVALID_FIBER;
-  }
-
-  VM_FiberGetOrSetLocal op(this, Handle(current_thread, fiber_obj), depth, slot, T_DOUBLE);
-  VMThread::execute(&op);
-  *value_ptr = op.value().d;
-  return op.result();
-} /* end GetFiberLocalDouble */
-
 
   //
   // Thread functions
@@ -1104,11 +909,27 @@ JvmtiEnv::GetThreadState(jthread thread, jint* thread_state_ptr) {
       // We got an error code so we don't have a JavaThread *, but
       // only return an error from here if we didn't get a valid
       // thread_oop.
+      // In avthread case the cv_external_thread_to_JavaThread is expected to correctly set
+      // the thread_oop and return JVMTI_ERROR_INVALID_THREAD which we ignore here.
       if (thread_oop == NULL) {
         return err;
       }
       // We have a valid thread_oop so we can return some thread state.
     }
+  }
+
+  // Support for virtual thread
+  if (java_lang_VirtualThread::is_instance(thread_oop)) {
+    if (!get_capabilities()->can_support_fibers) {
+      return JVMTI_ERROR_MUST_POSSESS_CAPABILITY;
+    }
+    jshort vthread_state = java_lang_VirtualThread::state(thread_oop);
+    jint state = (jint) java_lang_VirtualThread::map_state_to_thread_status(vthread_state);
+    if (java_lang_Thread::interrupted(thread_oop)) {
+      state |= JVMTI_THREAD_STATE_INTERRUPTED;
+    }
+    *thread_state_ptr = state;
+    return JVMTI_ERROR_NONE;
   }
 
   // get most state bits
@@ -1124,8 +945,7 @@ JvmtiEnv::GetThreadState(jthread thread, jint* thread_state_ptr) {
     if (jts == _thread_in_native) {
       state |= JVMTI_THREAD_STATE_IN_NATIVE;
     }
-    OSThread* osThread = java_thread->osthread();
-    if (osThread != NULL && osThread->interrupted()) {
+    if (java_thread->is_interrupted(false)) {
       state |= JVMTI_THREAD_STATE_INTERRUPTED;
     }
   }
@@ -1337,7 +1157,6 @@ JvmtiEnv::StopThread(JavaThread* java_thread, jobject exception) {
 // thread - NOT pre-checked
 jvmtiError
 JvmtiEnv::InterruptThread(jthread thread) {
-  // TODO: this is very similar to JVM_Interrupt(); share code in future
   JavaThread* current_thread  = JavaThread::current();
   JavaThread* java_thread = NULL;
   ThreadsListHandle tlh(current_thread);
@@ -1345,7 +1164,11 @@ JvmtiEnv::InterruptThread(jthread thread) {
   if (err != JVMTI_ERROR_NONE) {
     return err;
   }
-
+  // Really this should be a Java call to Thread.interrupt to ensure the same
+  // semantics, however historically this has not been done for some reason.
+  // So we continue with that (which means we don't interact with any Java-level
+  // Interruptible object) but we must set the Java-level interrupted state.
+  java_lang_Thread::set_interrupted(JNIHandles::resolve(thread), true);
   java_thread->interrupt();
 
   return JVMTI_ERROR_NONE;
@@ -1377,6 +1200,8 @@ JvmtiEnv::GetThreadInfo(jthread thread, jvmtiThreadInfo* info_ptr) {
       // We got an error code so we don't have a JavaThread *, but
       // only return an error from here if we didn't get a valid
       // thread_oop.
+      // In the virtual thread case the cv_external_thread_to_JavaThread is expected to correctly set
+      // the thread_oop and return JVMTI_ERROR_INVALID_THREAD which we ignore here.
       if (thread_oop == NULL) {
         return err;
       }
@@ -1392,9 +1217,20 @@ JvmtiEnv::GetThreadInfo(jthread thread, jvmtiThreadInfo* info_ptr) {
   bool          is_daemon;
 
   name = Handle(current_thread, java_lang_Thread::name(thread_obj()));
-  priority = java_lang_Thread::priority(thread_obj());
-  thread_group = Handle(current_thread, java_lang_Thread::threadGroup(thread_obj()));
-  is_daemon = java_lang_Thread::is_daemon(thread_obj());
+
+  // Support for virtual threads
+  if (java_lang_VirtualThread::is_instance(thread_obj())) {
+    if (!get_capabilities()->can_support_fibers) {
+      return JVMTI_ERROR_MUST_POSSESS_CAPABILITY;
+    }
+    priority = (ThreadPriority)JVMTI_THREAD_NORM_PRIORITY;
+    is_daemon = true;
+    thread_group = Handle(current_thread, java_lang_Thread_VirtualThreads::get_THREAD_GROUP());
+  } else {
+    priority = java_lang_Thread::priority(thread_obj());
+    is_daemon = java_lang_Thread::is_daemon(thread_obj());
+    thread_group = Handle(current_thread, java_lang_Thread::threadGroup(thread_obj()));
+  }
 
   oop loader = java_lang_Thread::context_class_loader(thread_obj());
   context_class_loader = Handle(current_thread, loader);
@@ -1418,36 +1254,61 @@ JvmtiEnv::GetThreadInfo(jthread thread, jvmtiThreadInfo* info_ptr) {
   info_ptr->priority  = priority;
 
   info_ptr->context_class_loader = (context_class_loader.is_null()) ? NULL :
-                                     jni_reference(context_class_loader);
+                                    jni_reference(context_class_loader);
   info_ptr->thread_group = jni_reference(thread_group);
 
   return JVMTI_ERROR_NONE;
 } /* end GetThreadInfo */
 
 
-// Threads_lock NOT held, java_thread not protected by lock
-// java_thread - pre-checked
+// Threads_lock NOT held
+// thread - NOT pre-checked
 // owned_monitor_count_ptr - pre-checked for NULL
 // owned_monitors_ptr - pre-checked for NULL
 jvmtiError
-JvmtiEnv::GetOwnedMonitorInfo(JavaThread* java_thread, jint* owned_monitor_count_ptr, jobject** owned_monitors_ptr) {
+JvmtiEnv::GetOwnedMonitorInfo(jthread thread, jint* owned_monitor_count_ptr, jobject** owned_monitors_ptr) {
   jvmtiError err = JVMTI_ERROR_NONE;
   JavaThread* calling_thread = JavaThread::current();
+  HandleMark hm(calling_thread);
+  oop thread_obj = JNIHandles::resolve_external_guard(thread);
 
   // growable array of jvmti monitors info on the C-heap
   GrowableArray<jvmtiMonitorStackDepthInfo*> *owned_monitors_list =
       new (ResourceObj::C_HEAP, mtInternal) GrowableArray<jvmtiMonitorStackDepthInfo*>(1, true);
 
-  // It is only safe to perform the direct operation on the current
-  // thread. All other usage needs to use a vm-safepoint-op for safety.
-  if (java_thread == calling_thread) {
-    err = get_owned_monitors(calling_thread, java_thread, owned_monitors_list);
-  } else {
-    // JVMTI get monitors info at safepoint. Do not require target thread to
-    // be suspended.
-    VM_GetOwnedMonitorInfo op(this, calling_thread, java_thread, owned_monitors_list);
+  // Support for virtual threads
+  if (java_lang_VirtualThread::is_instance(thread_obj)) {
+    if (!get_capabilities()->can_support_fibers) {
+      return JVMTI_ERROR_MUST_POSSESS_CAPABILITY;
+    }
+    VM_VirtualThreadGetOwnedMonitorInfo op(this,
+                                           calling_thread,
+                                           Handle(calling_thread, thread_obj),
+                                           owned_monitors_list);
     VMThread::execute(&op);
     err = op.result();
+  } else {
+    // Support for ordinary threads
+    JavaThread* java_thread = NULL;
+    ThreadsListHandle tlh(calling_thread);
+
+    err = get_JavaThread(tlh.list(), thread, &java_thread);
+    if (err != JVMTI_ERROR_NONE) {
+      delete owned_monitors_list;
+      return err;
+    }
+
+    // It is only safe to perform the direct operation on the current
+    // thread. All other usage needs to use a vm-safepoint-op for safety.
+    if (java_thread == calling_thread) {
+      err = get_owned_monitors(calling_thread, java_thread, owned_monitors_list);
+    } else {
+      // JVMTI get monitors info at safepoint.
+      // Do not require target thread to
+      VM_GetOwnedMonitorInfo op(this, calling_thread, java_thread, owned_monitors_list);
+      VMThread::execute(&op);
+      err = op.result();
+    }
   }
   jint owned_monitor_count = owned_monitors_list->length();
   if (err == JVMTI_ERROR_NONE) {
@@ -1471,35 +1332,59 @@ JvmtiEnv::GetOwnedMonitorInfo(JavaThread* java_thread, jint* owned_monitor_count
 } /* end GetOwnedMonitorInfo */
 
 
-// Threads_lock NOT held, java_thread not protected by lock
-// java_thread - pre-checked
+// Threads_lock NOT held
+// thread - NOT pre-checked
 // monitor_info_count_ptr - pre-checked for NULL
 // monitor_info_ptr - pre-checked for NULL
 jvmtiError
-JvmtiEnv::GetOwnedMonitorStackDepthInfo(JavaThread* java_thread, jint* monitor_info_count_ptr, jvmtiMonitorStackDepthInfo** monitor_info_ptr) {
+JvmtiEnv::GetOwnedMonitorStackDepthInfo(jthread thread, jint* monitor_info_count_ptr, jvmtiMonitorStackDepthInfo** monitor_info_ptr) {
   jvmtiError err = JVMTI_ERROR_NONE;
-  JavaThread* calling_thread  = JavaThread::current();
+  JavaThread* calling_thread = JavaThread::current();
+  HandleMark hm(calling_thread);
+  oop thread_obj = JNIHandles::resolve_external_guard(thread);
 
   // growable array of jvmti monitors info on the C-heap
   GrowableArray<jvmtiMonitorStackDepthInfo*> *owned_monitors_list =
          new (ResourceObj::C_HEAP, mtInternal) GrowableArray<jvmtiMonitorStackDepthInfo*>(1, true);
 
-  // It is only safe to perform the direct operation on the current
-  // thread. All other usage needs to use a vm-safepoint-op for safety.
-  if (java_thread == calling_thread) {
-    err = get_owned_monitors(calling_thread, java_thread, owned_monitors_list);
-  } else {
-    // JVMTI get owned monitors info at safepoint. Do not require target thread to
-    // be suspended.
-    VM_GetOwnedMonitorInfo op(this, calling_thread, java_thread, owned_monitors_list);
+  // Support for virtual threads
+  if (java_lang_VirtualThread::is_instance(thread_obj)) {
+    if (!get_capabilities()->can_support_fibers) {
+      return JVMTI_ERROR_MUST_POSSESS_CAPABILITY;
+    }
+    VM_VirtualThreadGetOwnedMonitorInfo op(this,
+                                   calling_thread,
+                                   Handle(calling_thread, thread_obj),
+                                   owned_monitors_list);
     VMThread::execute(&op);
     err = op.result();
-  }
+  } else {
+    // Support for ordinary threads
+    JavaThread* java_thread = NULL;
+    ThreadsListHandle tlh(calling_thread);
 
+    err = get_JavaThread(tlh.list(), thread, &java_thread);
+    if (err != JVMTI_ERROR_NONE) {
+      delete owned_monitors_list;
+      return err;
+    }
+
+    // It is only safe to perform the direct operation on the current
+    // thread. All other usage needs to use a vm-safepoint-op for safety.
+    if (java_thread == calling_thread) {
+      err = get_owned_monitors(calling_thread, java_thread, owned_monitors_list);
+    } else {
+      // JVMTI get owned monitors info at safepoint.
+      // Do not require target thread to be suspended.
+      VM_GetOwnedMonitorInfo op(this, calling_thread, java_thread, owned_monitors_list);
+      VMThread::execute(&op);
+      err = op.result();
+    }
+  }
   jint owned_monitor_count = owned_monitors_list->length();
   if (err == JVMTI_ERROR_NONE) {
     if ((err = allocate(owned_monitor_count * sizeof(jvmtiMonitorStackDepthInfo),
-                      (unsigned char**)monitor_info_ptr)) == JVMTI_ERROR_NONE) {
+                        (unsigned char**)monitor_info_ptr)) == JVMTI_ERROR_NONE) {
       // copy to output array.
       for (int i = 0; i < owned_monitor_count; i++) {
         (*monitor_info_ptr)[i].monitor =
@@ -1521,14 +1406,36 @@ JvmtiEnv::GetOwnedMonitorStackDepthInfo(JavaThread* java_thread, jint* monitor_i
 } /* end GetOwnedMonitorStackDepthInfo */
 
 
-// Threads_lock NOT held, java_thread not protected by lock
-// java_thread - pre-checked
+// Threads_lock NOT held
+// thread - NOT pre-checked
 // monitor_ptr - pre-checked for NULL
 jvmtiError
-JvmtiEnv::GetCurrentContendedMonitor(JavaThread* java_thread, jobject* monitor_ptr) {
+JvmtiEnv::GetCurrentContendedMonitor(jthread thread, jobject* monitor_ptr) {
   jvmtiError err = JVMTI_ERROR_NONE;
-  JavaThread* calling_thread  = JavaThread::current();
+  JavaThread* calling_thread = JavaThread::current();
+  HandleMark hm(calling_thread);
+  oop thread_obj = JNIHandles::resolve_external_guard(thread);
 
+  // Support for virtual threads
+  if (java_lang_VirtualThread::is_instance(thread_obj)) {
+    if (!get_capabilities()->can_support_fibers) {
+      return JVMTI_ERROR_MUST_POSSESS_CAPABILITY;
+    }
+    VM_VirtualThreadGetCurrentContendedMonitor op(this, calling_thread,
+                                          Handle(calling_thread, thread_obj),
+                                          monitor_ptr);
+    VMThread::execute(&op);
+    err = op.result();
+    return err;
+  }
+  // Support for ordinary threads
+  ThreadsListHandle tlh(calling_thread);
+  JavaThread* java_thread = NULL;
+
+  err = get_JavaThread(tlh.list(), thread, &java_thread);
+  if (err != JVMTI_ERROR_NONE) {
+    return err;
+  }
   // It is only safe to perform the direct operation on the current
   // thread. All other usage needs to use a vm-safepoint-op for safety.
   if (java_thread == calling_thread) {
@@ -1576,7 +1483,7 @@ JvmtiEnv::RunAgentThread(jthread thread, jvmtiStartFunction proc, const void* ar
 
   Handle thread_hndl(current_thread, thread_oop);
   {
-    MutexLocker mu(Threads_lock); // grab Threads_lock
+    MutexLocker mu(current_thread, Threads_lock); // grab Threads_lock
 
     JvmtiAgentThread *new_thread = new JvmtiAgentThread(this, proc, arg);
 
@@ -1759,14 +1666,36 @@ JvmtiEnv::GetThreadGroupChildren(jthreadGroup group, jint* thread_count_ptr, jth
   // Stack Frame functions
   //
 
-// Threads_lock NOT held, java_thread not protected by lock
-// java_thread - pre-checked
+// Threads_lock NOT held
+// thread - NOT pre-checked
 // max_frame_count - pre-checked to be greater than or equal to 0
 // frame_buffer - pre-checked for NULL
 // count_ptr - pre-checked for NULL
 jvmtiError
-JvmtiEnv::GetStackTrace(JavaThread* java_thread, jint start_depth, jint max_frame_count, jvmtiFrameInfo* frame_buffer, jint* count_ptr) {
+JvmtiEnv::GetStackTrace(jthread thread, jint start_depth, jint max_frame_count, jvmtiFrameInfo* frame_buffer, jint* count_ptr) {
   jvmtiError err = JVMTI_ERROR_NONE;
+  JavaThread* java_thread = NULL;
+  JavaThread* current_thread = JavaThread::current();
+  HandleMark hm(current_thread);
+  oop thread_obj = JNIHandles::resolve_external_guard(thread);
+
+  // Support for virtual threads
+  if (java_lang_VirtualThread::is_instance(thread_obj)) {
+    if (!get_capabilities()->can_support_fibers) {
+      return JVMTI_ERROR_MUST_POSSESS_CAPABILITY;
+    }
+    VM_VirtualThreadGetStackTrace op(this, Handle(current_thread, thread_obj),
+                             start_depth, max_frame_count, frame_buffer, count_ptr);
+    VMThread::execute(&op);
+    return op.result();
+  }
+
+  // Support for ordinary threads
+  ThreadsListHandle tlh(current_thread);
+  err = get_JavaThread(tlh.list(), thread, &java_thread);
+  if (err != JVMTI_ERROR_NONE) {
+    return err;
+  }
 
   // It is only safe to perform the direct operation on the current
   // thread. All other usage needs to use a vm-safepoint-op for safety.
@@ -1820,12 +1749,33 @@ JvmtiEnv::GetThreadListStackTraces(jint thread_count, const jthread* thread_list
 } /* end GetThreadListStackTraces */
 
 
-// Threads_lock NOT held, java_thread not protected by lock
-// java_thread - pre-checked
+// Threads_lock NOT held
+// thread - NOT pre-checked
 // count_ptr - pre-checked for NULL
 jvmtiError
-JvmtiEnv::GetFrameCount(JavaThread* java_thread, jint* count_ptr) {
+JvmtiEnv::GetFrameCount(jthread thread, jint* count_ptr) {
   jvmtiError err = JVMTI_ERROR_NONE;
+  JavaThread* java_thread = NULL;
+  JavaThread* current_thread = JavaThread::current();
+  HandleMark hm(current_thread);
+  oop thread_obj = JNIHandles::resolve_external_guard(thread);
+
+  // Support for virtual threads
+  if (java_lang_VirtualThread::is_instance(thread_obj)) {
+    if (!get_capabilities()->can_support_fibers) {
+      return JVMTI_ERROR_MUST_POSSESS_CAPABILITY;
+    }
+    VM_VirtualThreadGetFrameCount op(this, Handle(current_thread, thread_obj), count_ptr);
+    VMThread::execute(&op);
+    return op.result();
+  }
+
+  // Support for ordinary threads
+  ThreadsListHandle tlh(current_thread);
+  err = get_JavaThread(tlh.list(), thread, &java_thread);
+  if (err != JVMTI_ERROR_NONE) {
+    return err;
+  }
 
   // retrieve or create JvmtiThreadState.
   JvmtiThreadState* state = JvmtiThreadState::state_for(java_thread);
@@ -1953,15 +1903,36 @@ JvmtiEnv::PopFrame(JavaThread* java_thread) {
 } /* end PopFrame */
 
 
-// Threads_lock NOT held, java_thread not protected by lock
-// java_thread - pre-checked
-// java_thread - unchecked
+// Threads_lock NOT held
+// thread - NOT pre-checked
 // depth - pre-checked as non-negative
 // method_ptr - pre-checked for NULL
 // location_ptr - pre-checked for NULL
 jvmtiError
-JvmtiEnv::GetFrameLocation(JavaThread* java_thread, jint depth, jmethodID* method_ptr, jlocation* location_ptr) {
+JvmtiEnv::GetFrameLocation(jthread thread, jint depth, jmethodID* method_ptr, jlocation* location_ptr) {
   jvmtiError err = JVMTI_ERROR_NONE;
+  JavaThread* java_thread = NULL;
+  JavaThread* current_thread = JavaThread::current();
+  HandleMark hm(current_thread);
+  oop thread_obj = JNIHandles::resolve_external_guard(thread);
+
+  // Support for virtual threads
+  if (java_lang_VirtualThread::is_instance(thread_obj)) {
+    if (!get_capabilities()->can_support_fibers) {
+      return JVMTI_ERROR_MUST_POSSESS_CAPABILITY;
+    }
+    VM_VirtualThreadGetFrameLocation op(this, Handle(current_thread, thread_obj),
+                                depth, method_ptr, location_ptr);
+    VMThread::execute(&op);
+    return op.result();
+  }
+
+  // Support for ordinary threads
+  ThreadsListHandle tlh(current_thread);
+  err = get_JavaThread(tlh.list(), thread, &java_thread);
+  if (err != JVMTI_ERROR_NONE) {
+    return err;
+  }
 
   // It is only safe to perform the direct operation on the current
   // thread. All other usage needs to use a vm-safepoint-op for safety.
@@ -2258,123 +2229,274 @@ JvmtiEnv::IterateOverInstancesOfClass(oop k_mirror, jvmtiHeapObjectFilter object
   // Local Variable functions
   //
 
-// Threads_lock NOT held, java_thread not protected by lock
-// java_thread - pre-checked
-// java_thread - unchecked
+// Threads_lock NOT held
+// thread - NOT pre-checked
 // depth - pre-checked as non-negative
 // value_ptr - pre-checked for NULL
 jvmtiError
-JvmtiEnv::GetLocalObject(JavaThread* java_thread, jint depth, jint slot, jobject* value_ptr) {
+JvmtiEnv::GetLocalObject(jthread thread, jint depth, jint slot, jobject* value_ptr) {
+  jvmtiError err = JVMTI_ERROR_NONE;
+  JavaThread* java_thread = NULL;
   JavaThread* current_thread = JavaThread::current();
   // rm object is created to clean up the javaVFrame created in
   // doit_prologue(), but after doit() is finished with it.
   ResourceMark rm(current_thread);
+  HandleMark hm(current_thread);
+  oop thread_obj = JNIHandles::resolve_external_guard(thread);
 
-  VM_GetOrSetLocal op(java_thread, current_thread, depth, slot);
-  VMThread::execute(&op);
-  jvmtiError err = op.result();
-  if (err == JVMTI_ERROR_NONE) {
-    *value_ptr = op.value().l;
+  if (java_lang_VirtualThread::is_instance(thread_obj)) {
+    // Support for virtual threads
+    if (!get_capabilities()->can_support_fibers) {
+      return JVMTI_ERROR_MUST_POSSESS_CAPABILITY;
+    }
+    VM_VirtualThreadGetOrSetLocal op(this, Handle(current_thread, thread_obj),
+                                   current_thread, depth, slot);
+    VMThread::execute(&op);
+    err = op.result();
+    if (err == JVMTI_ERROR_NONE) {
+      *value_ptr = op.value().l;
+    }
+  } else {
+    // Support for ordinary threads
+    ThreadsListHandle tlh(current_thread);
+    err = get_JavaThread(tlh.list(), thread, &java_thread);
+    if (err != JVMTI_ERROR_NONE) {
+      return err;
+    }
+    VM_GetOrSetLocal op(java_thread, current_thread, depth, slot);
+    VMThread::execute(&op);
+    err = op.result();
+    if (err == JVMTI_ERROR_NONE) {
+      *value_ptr = op.value().l;
+    }
   }
   return err;
 } /* end GetLocalObject */
 
-// Threads_lock NOT held, java_thread not protected by lock
-// java_thread - pre-checked
-// java_thread - unchecked
+// Threads_lock NOT held
+// thread - NOT pre-checked
 // depth - pre-checked as non-negative
 // value - pre-checked for NULL
 jvmtiError
-JvmtiEnv::GetLocalInstance(JavaThread* java_thread, jint depth, jobject* value_ptr){
+JvmtiEnv::GetLocalInstance(jthread thread, jint depth, jobject* value_ptr){
+  jvmtiError err = JVMTI_ERROR_NONE;
+  JavaThread* java_thread = NULL;
   JavaThread* current_thread = JavaThread::current();
   // rm object is created to clean up the javaVFrame created in
   // doit_prologue(), but after doit() is finished with it.
   ResourceMark rm(current_thread);
+  HandleMark hm(current_thread);
+  oop thread_obj = JNIHandles::resolve_external_guard(thread);
 
-  VM_GetReceiver op(java_thread, current_thread, depth);
-  VMThread::execute(&op);
-  jvmtiError err = op.result();
-  if (err == JVMTI_ERROR_NONE) {
-    *value_ptr = op.value().l;
+  if (java_lang_VirtualThread::is_instance(thread_obj)) {
+    // Support for virtual threads
+    if (!get_capabilities()->can_support_fibers) {
+      return JVMTI_ERROR_MUST_POSSESS_CAPABILITY;
+    }
+    VM_VirtualThreadGetReceiver op(this, Handle(current_thread, thread_obj),
+                                 current_thread, depth);
+    VMThread::execute(&op);
+    err = op.result();
+    if (err == JVMTI_ERROR_NONE) { 
+      *value_ptr = op.value().l;
+    }
+  } else {
+    // Support for ordinary threads
+    ThreadsListHandle tlh(current_thread);
+    err = get_JavaThread(tlh.list(), thread, &java_thread);
+    if (err != JVMTI_ERROR_NONE) {
+      return err;
+    }
+    VM_GetReceiver op(java_thread, current_thread, depth);
+    VMThread::execute(&op);
+    err = op.result();
+    if (err == JVMTI_ERROR_NONE) { 
+      *value_ptr = op.value().l;
+    }
   }
   return err;
 } /* end GetLocalInstance */
 
 
-// Threads_lock NOT held, java_thread not protected by lock
-// java_thread - pre-checked
-// java_thread - unchecked
+// Threads_lock NOT held
+// thread - NOT pre-checked
 // depth - pre-checked as non-negative
 // value_ptr - pre-checked for NULL
 jvmtiError
-JvmtiEnv::GetLocalInt(JavaThread* java_thread, jint depth, jint slot, jint* value_ptr) {
+JvmtiEnv::GetLocalInt(jthread thread, jint depth, jint slot, jint* value_ptr) {
+  jvmtiError err = JVMTI_ERROR_NONE;
+  JavaThread* java_thread = NULL;
+  JavaThread* current_thread = JavaThread::current();
   // rm object is created to clean up the javaVFrame created in
   // doit_prologue(), but after doit() is finished with it.
-  ResourceMark rm;
+  ResourceMark rm(current_thread);
+  HandleMark hm(current_thread);
+  oop thread_obj = JNIHandles::resolve_external_guard(thread);
 
-  VM_GetOrSetLocal op(java_thread, depth, slot, T_INT);
-  VMThread::execute(&op);
-  *value_ptr = op.value().i;
-  return op.result();
+  if (java_lang_VirtualThread::is_instance(thread_obj)) {
+    // Support for virtual threads
+    if (!get_capabilities()->can_support_fibers) {
+      return JVMTI_ERROR_MUST_POSSESS_CAPABILITY;
+    }
+    VM_VirtualThreadGetOrSetLocal op(this, Handle(current_thread, thread_obj),
+                                   depth, slot, T_INT);
+    VMThread::execute(&op);
+    err = op.result();
+    if (err == JVMTI_ERROR_NONE) {
+      *value_ptr = op.value().i;
+    }
+  } else {
+    // Support for ordinary threads
+    ThreadsListHandle tlh(current_thread);
+    err = get_JavaThread(tlh.list(), thread, &java_thread);
+    if (err != JVMTI_ERROR_NONE) {
+      return err;
+    }
+    VM_GetOrSetLocal op(java_thread, depth, slot, T_INT);
+    VMThread::execute(&op);
+    err = op.result();
+    if (err == JVMTI_ERROR_NONE) {
+      *value_ptr = op.value().i;
+    }
+  }
+  return err;
 } /* end GetLocalInt */
 
 
-// Threads_lock NOT held, java_thread not protected by lock
-// java_thread - pre-checked
-// java_thread - unchecked
+// Threads_lock NOT held
+// thread - NOT pre-checked
 // depth - pre-checked as non-negative
 // value_ptr - pre-checked for NULL
 jvmtiError
-JvmtiEnv::GetLocalLong(JavaThread* java_thread, jint depth, jint slot, jlong* value_ptr) {
+JvmtiEnv::GetLocalLong(jthread thread, jint depth, jint slot, jlong* value_ptr) {
+  jvmtiError err = JVMTI_ERROR_NONE;
+  JavaThread* java_thread = NULL;
+  JavaThread* current_thread = JavaThread::current();
   // rm object is created to clean up the javaVFrame created in
   // doit_prologue(), but after doit() is finished with it.
-  ResourceMark rm;
+  ResourceMark rm(current_thread);
+  HandleMark hm(current_thread);
+  oop thread_obj = JNIHandles::resolve_external_guard(thread);
 
-  VM_GetOrSetLocal op(java_thread, depth, slot, T_LONG);
-  VMThread::execute(&op);
-  *value_ptr = op.value().j;
-  return op.result();
+  if (java_lang_VirtualThread::is_instance(thread_obj)) {
+    // Support for virtual threads
+    if (!get_capabilities()->can_support_fibers) {
+      return JVMTI_ERROR_MUST_POSSESS_CAPABILITY;
+    }
+    VM_VirtualThreadGetOrSetLocal op(this, Handle(current_thread, thread_obj),
+                                   depth, slot, T_LONG);
+    VMThread::execute(&op);
+    err = op.result();
+    if (err == JVMTI_ERROR_NONE) {
+      *value_ptr = op.value().j;
+    }
+  } else {
+    // Support for ordinary threads
+    ThreadsListHandle tlh(current_thread);
+    err = get_JavaThread(tlh.list(), thread, &java_thread);
+    if (err != JVMTI_ERROR_NONE) {
+      return err;
+    }
+    VM_GetOrSetLocal op(java_thread, depth, slot, T_LONG);
+    VMThread::execute(&op);
+    err = op.result();
+    if (err == JVMTI_ERROR_NONE) {
+      *value_ptr = op.value().j;
+    }
+  }
+  return err;
 } /* end GetLocalLong */
 
 
-// Threads_lock NOT held, java_thread not protected by lock
-// java_thread - pre-checked
-// java_thread - unchecked
+// Threads_lock NOT held
+// thread - NOT pre-checked
 // depth - pre-checked as non-negative
 // value_ptr - pre-checked for NULL
 jvmtiError
-JvmtiEnv::GetLocalFloat(JavaThread* java_thread, jint depth, jint slot, jfloat* value_ptr) {
+JvmtiEnv::GetLocalFloat(jthread thread, jint depth, jint slot, jfloat* value_ptr) {
+  jvmtiError err = JVMTI_ERROR_NONE;
+  JavaThread* java_thread = NULL;
+  JavaThread* current_thread = JavaThread::current();
   // rm object is created to clean up the javaVFrame created in
   // doit_prologue(), but after doit() is finished with it.
-  ResourceMark rm;
+  ResourceMark rm(current_thread);
+  HandleMark hm(current_thread);
+  oop thread_obj = JNIHandles::resolve_external_guard(thread);
 
-  VM_GetOrSetLocal op(java_thread, depth, slot, T_FLOAT);
-  VMThread::execute(&op);
-  *value_ptr = op.value().f;
-  return op.result();
+  if (java_lang_VirtualThread::is_instance(thread_obj)) {
+    // Support for virtual threads
+    if (!get_capabilities()->can_support_fibers) {
+      return JVMTI_ERROR_MUST_POSSESS_CAPABILITY;
+    }
+    VM_VirtualThreadGetOrSetLocal op(this, Handle(current_thread, thread_obj),
+                                   depth, slot, T_FLOAT);
+    VMThread::execute(&op);
+    err = op.result();
+    if (err == JVMTI_ERROR_NONE) {
+      *value_ptr = op.value().f;
+    }
+  } else {
+    // Support for ordinary threads
+    ThreadsListHandle tlh(current_thread);
+    err = get_JavaThread(tlh.list(), thread, &java_thread);
+    if (err != JVMTI_ERROR_NONE) {
+      return err;
+    }
+    VM_GetOrSetLocal op(java_thread, depth, slot, T_FLOAT);
+    VMThread::execute(&op);
+    err = op.result();
+    if (err == JVMTI_ERROR_NONE) {
+      *value_ptr = op.value().f;
+    }
+  }
+  return err;
 } /* end GetLocalFloat */
 
 
-// Threads_lock NOT held, java_thread not protected by lock
-// java_thread - pre-checked
-// java_thread - unchecked
+// Threads_lock NOT held
+// thread - NOT pre-checked
 // depth - pre-checked as non-negative
 // value_ptr - pre-checked for NULL
 jvmtiError
-JvmtiEnv::GetLocalDouble(JavaThread* java_thread, jint depth, jint slot, jdouble* value_ptr) {
+JvmtiEnv::GetLocalDouble(jthread thread, jint depth, jint slot, jdouble* value_ptr) {
+  jvmtiError err = JVMTI_ERROR_NONE;
+  JavaThread* java_thread = NULL;
+  JavaThread* current_thread = JavaThread::current();
   // rm object is created to clean up the javaVFrame created in
   // doit_prologue(), but after doit() is finished with it.
-  ResourceMark rm;
+  ResourceMark rm(current_thread);
+  HandleMark hm(current_thread);
+  oop thread_obj = JNIHandles::resolve_external_guard(thread);
 
-  VM_GetOrSetLocal op(java_thread, depth, slot, T_DOUBLE);
-  VMThread::execute(&op);
-  *value_ptr = op.value().d;
-  return op.result();
+  if (java_lang_VirtualThread::is_instance(thread_obj)) {
+    // Support for virtual threads
+    if (!get_capabilities()->can_support_fibers) {
+      return JVMTI_ERROR_MUST_POSSESS_CAPABILITY;
+    }
+    VM_VirtualThreadGetOrSetLocal op(this, Handle(current_thread, thread_obj),
+                                   depth, slot, T_DOUBLE);
+    VMThread::execute(&op);
+    err = op.result();
+    if (err == JVMTI_ERROR_NONE) {
+      *value_ptr = op.value().d;
+    }
+  } else {
+    // Support for ordinary threads
+    ThreadsListHandle tlh(current_thread);
+    err = get_JavaThread(tlh.list(), thread, &java_thread);
+    if (err != JVMTI_ERROR_NONE) {
+      return err;
+    }
+    VM_GetOrSetLocal op(java_thread, depth, slot, T_DOUBLE);
+    VMThread::execute(&op);
+    err = op.result();
+    if (err == JVMTI_ERROR_NONE) {
+      *value_ptr = op.value().d;
+    }
+  }
+  return err;
 } /* end GetLocalDouble */
 
-  //
-  // Fiber Local Variable functions
-  //
 
 // Threads_lock NOT held, java_thread not protected by lock
 // java_thread - pre-checked
@@ -3397,7 +3519,7 @@ JvmtiEnv::GetBytecodes(Method* method_oop, jint* bytecode_count_ptr, unsigned ch
   NULL_CHECK(method_oop, JVMTI_ERROR_INVALID_METHODID);
 
   HandleMark hm;
-  methodHandle method(method_oop);
+  methodHandle method(Thread::current(), method_oop);
   jint size = (jint)method->code_size();
   jvmtiError err = allocate(size, bytecodes_ptr);
   if (err != JVMTI_ERROR_NONE) {
@@ -3473,23 +3595,23 @@ JvmtiEnv::CreateRawMonitor(const char* name, jrawMonitorID* monitor_ptr) {
 jvmtiError
 JvmtiEnv::DestroyRawMonitor(JvmtiRawMonitor * rmonitor) {
   if (Threads::number_of_threads() == 0) {
-    // Remove this  monitor from pending raw monitors list
+    // Remove this monitor from pending raw monitors list
     // if it has entered in onload or start phase.
     JvmtiPendingMonitors::destroy(rmonitor);
   } else {
     Thread* thread  = Thread::current();
-    if (rmonitor->is_entered(thread)) {
+    if (rmonitor->owner() == thread) {
       // The caller owns this monitor which we are about to destroy.
       // We exit the underlying synchronization object so that the
       // "delete monitor" call below can work without an assertion
       // failure on systems that don't like destroying synchronization
       // objects that are locked.
       int r;
-      intptr_t recursion = rmonitor->recursions();
-      for (intptr_t i = 0; i <= recursion; i++) {
+      int recursion = rmonitor->recursions();
+      for (int i = 0; i <= recursion; i++) {
         r = rmonitor->raw_exit(thread);
-        assert(r == ObjectMonitor::OM_OK, "raw_exit should have worked");
-        if (r != ObjectMonitor::OM_OK) {  // robustness
+        assert(r == JvmtiRawMonitor::M_OK, "raw_exit should have worked");
+        if (r != JvmtiRawMonitor::M_OK) {  // robustness
           return JVMTI_ERROR_INTERNAL;
         }
       }
@@ -3515,7 +3637,7 @@ JvmtiEnv::DestroyRawMonitor(JvmtiRawMonitor * rmonitor) {
 jvmtiError
 JvmtiEnv::RawMonitorEnter(JvmtiRawMonitor * rmonitor) {
   if (Threads::number_of_threads() == 0) {
-    // No JavaThreads exist so ObjectMonitor enter cannot be
+    // No JavaThreads exist so JvmtiRawMonitor enter cannot be
     // used, add this raw monitor to the pending list.
     // The pending monitors will be actually entered when
     // the VM is setup.
@@ -3523,20 +3645,10 @@ JvmtiEnv::RawMonitorEnter(JvmtiRawMonitor * rmonitor) {
     // in thread.cpp.
     JvmtiPendingMonitors::enter(rmonitor);
   } else {
-    int r = 0;
     Thread* thread = Thread::current();
-
     if (thread->is_Java_thread()) {
       JavaThread* current_thread = (JavaThread*)thread;
 
-#ifdef PROPER_TRANSITIONS
-      // Not really unknown but ThreadInVMfromNative does more than we want
-      ThreadInVMfromUnknown __tiv;
-      {
-        ThreadBlockInVM __tbivm(current_thread);
-        r = rmonitor->raw_enter(current_thread);
-      }
-#else
       /* Transition to thread_blocked without entering vm state          */
       /* This is really evil. Normally you can't undo _thread_blocked    */
       /* transitions like this because it would cause us to miss a       */
@@ -3552,22 +3664,11 @@ JvmtiEnv::RawMonitorEnter(JvmtiRawMonitor * rmonitor) {
              current_thread->frame_anchor()->walkable(), "Must be walkable");
       current_thread->set_thread_state(_thread_blocked);
 
-      r = rmonitor->raw_enter(current_thread);
+      rmonitor->raw_enter(current_thread);
       // restore state, still at a safepoint safe state
       current_thread->set_thread_state(state);
-
-#endif /* PROPER_TRANSITIONS */
-      assert(r == ObjectMonitor::OM_OK, "raw_enter should have worked");
     } else {
-      if (thread->is_Named_thread()) {
-        r = rmonitor->raw_enter(thread);
-      } else {
-        ShouldNotReachHere();
-      }
-    }
-
-    if (r != ObjectMonitor::OM_OK) {  // robustness
-      return JVMTI_ERROR_INTERNAL;
+      rmonitor->raw_enter(thread);
     }
   }
   return JVMTI_ERROR_NONE;
@@ -3586,31 +3687,10 @@ JvmtiEnv::RawMonitorExit(JvmtiRawMonitor * rmonitor) {
       err = JVMTI_ERROR_NOT_MONITOR_OWNER;
     }
   } else {
-    int r = 0;
     Thread* thread = Thread::current();
-
-    if (thread->is_Java_thread()) {
-      JavaThread* current_thread = (JavaThread*)thread;
-#ifdef PROPER_TRANSITIONS
-      // Not really unknown but ThreadInVMfromNative does more than we want
-      ThreadInVMfromUnknown __tiv;
-#endif /* PROPER_TRANSITIONS */
-      r = rmonitor->raw_exit(current_thread);
-    } else {
-      if (thread->is_Named_thread()) {
-        r = rmonitor->raw_exit(thread);
-      } else {
-        ShouldNotReachHere();
-      }
-    }
-
-    if (r == ObjectMonitor::OM_ILLEGAL_MONITOR_STATE) {
+    int r = rmonitor->raw_exit(thread);
+    if (r == JvmtiRawMonitor::M_ILLEGAL_MONITOR_STATE) {
       err = JVMTI_ERROR_NOT_MONITOR_OWNER;
-    } else {
-      assert(r == ObjectMonitor::OM_OK, "raw_exit should have worked");
-      if (r != ObjectMonitor::OM_OK) {  // robustness
-        err = JVMTI_ERROR_INTERNAL;
-      }
     }
   }
   return err;
@@ -3620,89 +3700,29 @@ JvmtiEnv::RawMonitorExit(JvmtiRawMonitor * rmonitor) {
 // rmonitor - pre-checked for validity
 jvmtiError
 JvmtiEnv::RawMonitorWait(JvmtiRawMonitor * rmonitor, jlong millis) {
-  int r = 0;
   Thread* thread = Thread::current();
-
-  if (thread->is_Java_thread()) {
-    JavaThread* current_thread = (JavaThread*)thread;
-#ifdef PROPER_TRANSITIONS
-    // Not really unknown but ThreadInVMfromNative does more than we want
-    ThreadInVMfromUnknown __tiv;
-    {
-      ThreadBlockInVM __tbivm(current_thread);
-      r = rmonitor->raw_wait(millis, true, current_thread);
-    }
-#else
-    /* Transition to thread_blocked without entering vm state          */
-    /* This is really evil. Normally you can't undo _thread_blocked    */
-    /* transitions like this because it would cause us to miss a       */
-    /* safepoint but since the thread was already in _thread_in_native */
-    /* the thread is not leaving a safepoint safe state and it will    */
-    /* block when it tries to return from native. We can't safepoint   */
-    /* block in here because we could deadlock the vmthread. Blech.    */
-
-    JavaThreadState state = current_thread->thread_state();
-    assert(state == _thread_in_native, "Must be _thread_in_native");
-    // frame should already be walkable since we are in native
-    assert(!current_thread->has_last_Java_frame() ||
-           current_thread->frame_anchor()->walkable(), "Must be walkable");
-    current_thread->set_thread_state(_thread_blocked);
-
-    r = rmonitor->raw_wait(millis, true, current_thread);
-    // restore state, still at a safepoint safe state
-    current_thread->set_thread_state(state);
-
-#endif /* PROPER_TRANSITIONS */
-  } else {
-    if (thread->is_Named_thread()) {
-      r = rmonitor->raw_wait(millis, false, thread);
-    } else {
-      ShouldNotReachHere();
-    }
-  }
+  int r = rmonitor->raw_wait(millis, thread);
 
   switch (r) {
-  case ObjectMonitor::OM_INTERRUPTED:
+  case JvmtiRawMonitor::M_INTERRUPTED:
     return JVMTI_ERROR_INTERRUPT;
-  case ObjectMonitor::OM_ILLEGAL_MONITOR_STATE:
+  case JvmtiRawMonitor::M_ILLEGAL_MONITOR_STATE:
     return JVMTI_ERROR_NOT_MONITOR_OWNER;
+  default:
+    return JVMTI_ERROR_NONE;
   }
-  assert(r == ObjectMonitor::OM_OK, "raw_wait should have worked");
-  if (r != ObjectMonitor::OM_OK) {  // robustness
-    return JVMTI_ERROR_INTERNAL;
-  }
-
-  return JVMTI_ERROR_NONE;
 } /* end RawMonitorWait */
 
 
 // rmonitor - pre-checked for validity
 jvmtiError
 JvmtiEnv::RawMonitorNotify(JvmtiRawMonitor * rmonitor) {
-  int r = 0;
   Thread* thread = Thread::current();
+  int r = rmonitor->raw_notify(thread);
 
-  if (thread->is_Java_thread()) {
-    JavaThread* current_thread = (JavaThread*)thread;
-    // Not really unknown but ThreadInVMfromNative does more than we want
-    ThreadInVMfromUnknown __tiv;
-    r = rmonitor->raw_notify(current_thread);
-  } else {
-    if (thread->is_Named_thread()) {
-      r = rmonitor->raw_notify(thread);
-    } else {
-      ShouldNotReachHere();
-    }
-  }
-
-  if (r == ObjectMonitor::OM_ILLEGAL_MONITOR_STATE) {
+  if (r == JvmtiRawMonitor::M_ILLEGAL_MONITOR_STATE) {
     return JVMTI_ERROR_NOT_MONITOR_OWNER;
   }
-  assert(r == ObjectMonitor::OM_OK, "raw_notify should have worked");
-  if (r != ObjectMonitor::OM_OK) {  // robustness
-    return JVMTI_ERROR_INTERNAL;
-  }
-
   return JVMTI_ERROR_NONE;
 } /* end RawMonitorNotify */
 
@@ -3710,29 +3730,12 @@ JvmtiEnv::RawMonitorNotify(JvmtiRawMonitor * rmonitor) {
 // rmonitor - pre-checked for validity
 jvmtiError
 JvmtiEnv::RawMonitorNotifyAll(JvmtiRawMonitor * rmonitor) {
-  int r = 0;
   Thread* thread = Thread::current();
+  int r = rmonitor->raw_notifyAll(thread);
 
-  if (thread->is_Java_thread()) {
-    JavaThread* current_thread = (JavaThread*)thread;
-    ThreadInVMfromUnknown __tiv;
-    r = rmonitor->raw_notifyAll(current_thread);
-  } else {
-    if (thread->is_Named_thread()) {
-      r = rmonitor->raw_notifyAll(thread);
-    } else {
-      ShouldNotReachHere();
-    }
-  }
-
-  if (r == ObjectMonitor::OM_ILLEGAL_MONITOR_STATE) {
+  if (r == JvmtiRawMonitor::M_ILLEGAL_MONITOR_STATE) {
     return JVMTI_ERROR_NOT_MONITOR_OWNER;
   }
-  assert(r == ObjectMonitor::OM_OK, "raw_notifyAll should have worked");
-  if (r != ObjectMonitor::OM_OK) {  // robustness
-    return JVMTI_ERROR_INTERNAL;
-  }
-
   return JVMTI_ERROR_NONE;
 } /* end RawMonitorNotifyAll */
 

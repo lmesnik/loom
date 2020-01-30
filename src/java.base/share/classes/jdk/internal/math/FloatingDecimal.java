@@ -983,7 +983,11 @@ public class FloatingDecimal{
             };
 
     private static BinaryToASCIIBuffer getBinaryToASCIIBuffer() {
-        return threadLocalBinaryToASCIIBuffer.get();
+        if (Thread.currentThread().isVirtual()) {
+            return new BinaryToASCIIBuffer();
+        } else {
+            return threadLocalBinaryToASCIIBuffer.get();
+        }
     }
 
     /**

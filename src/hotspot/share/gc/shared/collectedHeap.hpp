@@ -88,7 +88,6 @@ class GCHeapLog : public EventLogBase<GCMessage> {
 // CollectedHeap
 //   GenCollectedHeap
 //     SerialHeap
-//     CMSHeap
 //   G1CollectedHeap
 //   ParallelScavengeHeap
 //   ShenandoahHeap
@@ -172,7 +171,6 @@ class CollectedHeap : public CHeapObj<mtInternal> {
     None,
     Serial,
     Parallel,
-    CMS,
     G1,
     Epsilon,
     Z,
@@ -359,6 +357,12 @@ class CollectedHeap : public CHeapObj<mtInternal> {
                                                        size_t size,
                                                        Metaspace::MetadataType mdtype);
 
+  // Continuation support
+  virtual void collect_for_codecache();
+  // If requires_barriers() returns false, then HeapAccesses into the object
+  // are equivalent to RawAccesses.
+  virtual bool requires_barriers(oop obj) const = 0;
+
   // Returns "true" iff there is a stop-world GC in progress.  (I assume
   // that it should answer "false" for the concurrent part of a concurrent
   // collector -- dld).
@@ -369,7 +373,6 @@ class CollectedHeap : public CHeapObj<mtInternal> {
   unsigned int total_full_collections() const { return _total_full_collections;}
 
   // Increment total number of GC collections (started)
-  // Should be protected but used by PSMarkSweep - cleanup for 1.4.2
   void increment_total_collections(bool full = false) {
     _total_collections++;
     if (full) {
@@ -389,9 +392,8 @@ class CollectedHeap : public CHeapObj<mtInternal> {
   // Iterate over all objects, calling "cl.do_object" on each.
   virtual void object_iterate(ObjectClosure* cl) = 0;
 
-  // Similar to object_iterate() except iterates only
-  // over live objects.
-  virtual void safe_object_iterate(ObjectClosure* cl) = 0;
+  // Keep alive an object that was loaded with AS_NO_KEEPALIVE.
+  virtual void keep_alive(oop obj) {}
 
   // Returns the longest time (in ms) that has elapsed since the last
   // time that any part of the heap was examined by a garbage collection.

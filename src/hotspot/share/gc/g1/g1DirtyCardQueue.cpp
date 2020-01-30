@@ -34,12 +34,15 @@
 #include "gc/g1/heapRegionRemSet.hpp"
 #include "gc/shared/suspendibleThreadSet.hpp"
 #include "gc/shared/workgroup.hpp"
-#include "runtime/atomic.hpp"
+#include "memory/iterator.hpp"
 #include "runtime/flags/flagSetting.hpp"
 #include "runtime/mutexLocker.hpp"
+#include "runtime/orderAccess.hpp"
+#include "runtime/os.hpp"
 #include "runtime/safepoint.hpp"
 #include "runtime/thread.inline.hpp"
 #include "runtime/threadSMR.hpp"
+#include "utilities/quickSort.hpp"
 
 G1DirtyCardQueue::G1DirtyCardQueue(G1DirtyCardQueueSet* qset) :
   // Dirty card queues are always active, so we create them with their
@@ -62,6 +65,9 @@ void G1DirtyCardQueue::handle_completed_buffer() {
   }
 }
 
+// Assumed to be zero by concurrent threads.
+static uint par_ids_start() { return 0; }
+
 G1DirtyCardQueueSet::G1DirtyCardQueueSet(Monitor* cbl_mon,
                                          BufferNode::Allocator* allocator) :
   PtrQueueSet(allocator),
@@ -73,20 +79,29 @@ G1DirtyCardQueueSet::G1DirtyCardQueueSet(Monitor* cbl_mon,
   _process_completed_buffers(false),
   _max_cards(MaxCardsUnlimited),
   _max_cards_padding(0),
-  _free_ids(0, num_par_ids()),
-  _processed_buffers_mut(0),
-  _processed_buffers_rs_thread(0)
+  _free_ids(par_ids_start(), num_par_ids()),
+  _mutator_refined_cards_counters(NEW_C_HEAP_ARRAY(size_t, num_par_ids(), mtGC))
 {
+  ::memset(_mutator_refined_cards_counters, 0, num_par_ids() * sizeof(size_t));
   _all_active = true;
 }
 
 G1DirtyCardQueueSet::~G1DirtyCardQueueSet() {
   abandon_completed_buffers();
+  FREE_C_HEAP_ARRAY(size_t, _mutator_refined_cards_counters);
 }
 
 // Determines how many mutator threads can process the buffers in parallel.
 uint G1DirtyCardQueueSet::num_par_ids() {
   return (uint)os::initial_active_processor_count();
+}
+
+size_t G1DirtyCardQueueSet::total_mutator_refined_cards() const {
+  size_t sum = 0;
+  for (uint i = 0; i < num_par_ids(); ++i) {
+    sum += _mutator_refined_cards_counters[i];
+  }
+  return sum;
 }
 
 void G1DirtyCardQueueSet::handle_zero_index_for_thread(Thread* t) {
@@ -213,18 +228,127 @@ G1BufferNodeList G1DirtyCardQueueSet::take_all_completed_buffers() {
   return result;
 }
 
-bool G1DirtyCardQueueSet::refine_buffer(BufferNode* node, uint worker_id) {
-  G1RemSet* rem_set = G1CollectedHeap::heap()->rem_set();
-  size_t size = buffer_size();
-  void** buffer = BufferNode::make_buffer_from_node(node);
-  size_t i = node->index();
-  assert(i <= size, "invariant");
-  for ( ; (i < size) && !SuspendibleThreadSet::should_yield(); ++i) {
-    CardTable::CardValue* cp = static_cast<CardTable::CardValue*>(buffer[i]);
-    rem_set->refine_card_concurrently(cp, worker_id);
+class G1RefineBufferedCards : public StackObj {
+  BufferNode* const _node;
+  CardTable::CardValue** const _node_buffer;
+  const size_t _node_buffer_size;
+  const uint _worker_id;
+  size_t* _total_refined_cards;
+  G1RemSet* const _g1rs;
+
+  static inline int compare_card(const CardTable::CardValue* p1,
+                                 const CardTable::CardValue* p2) {
+    return p2 - p1;
   }
-  node->set_index(i);
-  return i == size;
+
+  // Sorts the cards from start_index to _node_buffer_size in *decreasing*
+  // address order. Tests showed that this order is preferable to not sorting
+  // or increasing address order.
+  void sort_cards(size_t start_index) {
+    QuickSort::sort(&_node_buffer[start_index],
+                    _node_buffer_size - start_index,
+                    compare_card,
+                    false);
+  }
+
+  // Returns the index to the first clean card in the buffer.
+  size_t clean_cards() {
+    const size_t start = _node->index();
+    assert(start <= _node_buffer_size, "invariant");
+
+    // Two-fingered compaction algorithm similar to the filtering mechanism in
+    // SATBMarkQueue. The main difference is that clean_card_before_refine()
+    // could change the buffer element in-place.
+    // We don't check for SuspendibleThreadSet::should_yield(), because
+    // cleaning and redirtying the cards is fast.
+    CardTable::CardValue** src = &_node_buffer[start];
+    CardTable::CardValue** dst = &_node_buffer[_node_buffer_size];
+    assert(src <= dst, "invariant");
+    for ( ; src < dst; ++src) {
+      // Search low to high for a card to keep.
+      if (_g1rs->clean_card_before_refine(src)) {
+        // Found keeper.  Search high to low for a card to discard.
+        while (src < --dst) {
+          if (!_g1rs->clean_card_before_refine(dst)) {
+            *dst = *src;         // Replace discard with keeper.
+            break;
+          }
+        }
+        // If discard search failed (src == dst), the outer loop will also end.
+      }
+    }
+
+    // dst points to the first retained clean card, or the end of the buffer
+    // if all the cards were discarded.
+    const size_t first_clean = dst - _node_buffer;
+    assert(first_clean >= start && first_clean <= _node_buffer_size, "invariant");
+    // Discarded cards are considered as refined.
+    *_total_refined_cards += first_clean - start;
+    return first_clean;
+  }
+
+  bool refine_cleaned_cards(size_t start_index) {
+    bool result = true;
+    size_t i = start_index;
+    for ( ; i < _node_buffer_size; ++i) {
+      if (SuspendibleThreadSet::should_yield()) {
+        redirty_unrefined_cards(i);
+        result = false;
+        break;
+      }
+      _g1rs->refine_card_concurrently(_node_buffer[i], _worker_id);
+    }
+    _node->set_index(i);
+    *_total_refined_cards += i - start_index;
+    return result;
+  }
+
+  void redirty_unrefined_cards(size_t start) {
+    for ( ; start < _node_buffer_size; ++start) {
+      *_node_buffer[start] = G1CardTable::dirty_card_val();
+    }
+  }
+
+public:
+  G1RefineBufferedCards(BufferNode* node,
+                        size_t node_buffer_size,
+                        uint worker_id,
+                        size_t* total_refined_cards) :
+    _node(node),
+    _node_buffer(reinterpret_cast<CardTable::CardValue**>(BufferNode::make_buffer_from_node(node))),
+    _node_buffer_size(node_buffer_size),
+    _worker_id(worker_id),
+    _total_refined_cards(total_refined_cards),
+    _g1rs(G1CollectedHeap::heap()->rem_set()) {}
+
+  bool refine() {
+    size_t first_clean_index = clean_cards();
+    if (first_clean_index == _node_buffer_size) {
+      _node->set_index(first_clean_index);
+      return true;
+    }
+    // This fence serves two purposes. First, the cards must be cleaned
+    // before processing the contents. Second, we can't proceed with
+    // processing a region until after the read of the region's top in
+    // collect_and_clean_cards(), for synchronization with possibly concurrent
+    // humongous object allocation (see comment at the StoreStore fence before
+    // setting the regions' tops in humongous allocation path).
+    // It's okay that reading region's top and reading region's type were racy
+    // wrto each other. We need both set, in any order, to proceed.
+    OrderAccess::fence();
+    sort_cards(first_clean_index);
+    return refine_cleaned_cards(first_clean_index);
+  }
+};
+
+bool G1DirtyCardQueueSet::refine_buffer(BufferNode* node,
+                                        uint worker_id,
+                                        size_t* total_refined_cards) {
+  G1RefineBufferedCards buffered_cards(node,
+                                       buffer_size(),
+                                       worker_id,
+                                       total_refined_cards);
+  return buffered_cards.refine();
 }
 
 #ifndef ASSERT
@@ -260,25 +384,27 @@ bool G1DirtyCardQueueSet::process_or_enqueue_completed_buffer(BufferNode* node) 
 
 bool G1DirtyCardQueueSet::mut_process_buffer(BufferNode* node) {
   uint worker_id = _free_ids.claim_par_id(); // temporarily claim an id
-  bool result = refine_buffer(node, worker_id);
+  uint counter_index = worker_id - par_ids_start();
+  size_t* counter = &_mutator_refined_cards_counters[counter_index];
+  bool result = refine_buffer(node, worker_id, counter);
   _free_ids.release_par_id(worker_id); // release the id
 
   if (result) {
     assert_fully_consumed(node, buffer_size());
-    Atomic::inc(&_processed_buffers_mut);
   }
   return result;
 }
 
-bool G1DirtyCardQueueSet::refine_completed_buffer_concurrently(uint worker_id, size_t stop_at) {
+bool G1DirtyCardQueueSet::refine_completed_buffer_concurrently(uint worker_id,
+                                                               size_t stop_at,
+                                                               size_t* total_refined_cards) {
   BufferNode* node = get_completed_buffer(stop_at);
   if (node == NULL) {
     return false;
-  } else if (refine_buffer(node, worker_id)) {
+  } else if (refine_buffer(node, worker_id, total_refined_cards)) {
     assert_fully_consumed(node, buffer_size());
     // Done with fully processed buffer.
     deallocate_buffer(node);
-    Atomic::inc(&_processed_buffers_rs_thread);
     return true;
   } else {
     // Return partially processed buffer to the queue.

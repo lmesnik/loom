@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2013, 2019, Red Hat, Inc. All rights reserved.
+ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
@@ -73,7 +74,7 @@ public:
 
 void ShenandoahBarrierSet::clone_barrier(oop obj) {
   assert(ShenandoahCloneBarrier, "only get here with clone barriers enabled");
-  if (!_heap->has_forwarded_objects()) return;
+  assert(_heap->has_forwarded_objects(), "only when heap is unstable");
 
   // This is called for cloning an object (see jvm.cpp) after the clone
   // has been made. We are not interested in any 'previous value' because

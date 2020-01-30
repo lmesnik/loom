@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -56,6 +56,7 @@
 #include "oops/instanceKlass.hpp"
 #include "oops/instanceMirrorKlass.hpp"
 #include "oops/instanceRefKlass.hpp"
+#include "oops/instanceStackChunkKlass.hpp"
 #include "oops/objArrayOop.inline.hpp"
 #include "oops/oop.inline.hpp"
 #include "oops/typeArrayKlass.hpp"
@@ -85,18 +86,24 @@
 #include "utilities/ostream.hpp"
 #include "utilities/preserveException.hpp"
 
+#define PRIMITIVE_MIRRORS_DO(func) \
+  func(_int_mirror)    \
+  func(_float_mirror)  \
+  func(_double_mirror) \
+  func(_byte_mirror)   \
+  func(_bool_mirror)   \
+  func(_char_mirror)   \
+  func(_long_mirror)   \
+  func(_short_mirror)  \
+  func(_void_mirror)
+
+#define DEFINE_PRIMITIVE_MIRROR(m) \
+    oop Universe::m  = NULL;
+
 // Known objects
+PRIMITIVE_MIRRORS_DO(DEFINE_PRIMITIVE_MIRROR)
 Klass* Universe::_typeArrayKlassObjs[T_LONG+1]        = { NULL /*, NULL...*/ };
 Klass* Universe::_objectArrayKlassObj                 = NULL;
-oop Universe::_int_mirror                             = NULL;
-oop Universe::_float_mirror                           = NULL;
-oop Universe::_double_mirror                          = NULL;
-oop Universe::_byte_mirror                            = NULL;
-oop Universe::_bool_mirror                            = NULL;
-oop Universe::_char_mirror                            = NULL;
-oop Universe::_long_mirror                            = NULL;
-oop Universe::_short_mirror                           = NULL;
-oop Universe::_void_mirror                            = NULL;
 oop Universe::_mirrors[T_VOID+1]                      = { NULL /*, NULL...*/ };
 oop Universe::_main_thread_group                      = NULL;
 oop Universe::_system_thread_group                    = NULL;
@@ -167,17 +174,11 @@ void Universe::basic_type_classes_do(KlassClosure *closure) {
   }
 }
 
-void Universe::oops_do(OopClosure* f) {
+#define DO_PRIMITIVE_MIRROR(m) \
+  f->do_oop((oop*) &m);
 
-  f->do_oop((oop*) &_int_mirror);
-  f->do_oop((oop*) &_float_mirror);
-  f->do_oop((oop*) &_double_mirror);
-  f->do_oop((oop*) &_byte_mirror);
-  f->do_oop((oop*) &_bool_mirror);
-  f->do_oop((oop*) &_char_mirror);
-  f->do_oop((oop*) &_long_mirror);
-  f->do_oop((oop*) &_short_mirror);
-  f->do_oop((oop*) &_void_mirror);
+void Universe::oops_do(OopClosure* f) {
+  PRIMITIVE_MIRRORS_DO(DO_PRIMITIVE_MIRROR);
 
   for (int i = T_BOOLEAN; i < T_VOID+1; i++) {
     f->do_oop((oop*) &_mirrors[i]);
@@ -231,6 +232,13 @@ void Universe::metaspace_pointers_do(MetaspaceClosure* it) {
   _do_stack_walk_cache->metaspace_pointers_do(it);
 }
 
+#define ASSERT_MIRROR_NULL(m) \
+  assert(m == NULL, "archived mirrors should be NULL");
+
+#define SERIALIZE_MIRROR(m) \
+  f->do_oop(&m); \
+  if (m != NULL) { java_lang_Class::update_archived_primitive_mirror_native_pointers(m); }
+
 // Serialize metadata and pointers to primitive type mirrors in and out of CDS archive
 void Universe::serialize(SerializeClosure* f) {
 
@@ -239,25 +247,12 @@ void Universe::serialize(SerializeClosure* f) {
   }
 
   f->do_ptr((void**)&_objectArrayKlassObj);
+
 #if INCLUDE_CDS_JAVA_HEAP
-#ifdef ASSERT
-  if (DumpSharedSpaces && !HeapShared::is_heap_object_archiving_allowed()) {
-    assert(_int_mirror == NULL    && _float_mirror == NULL &&
-           _double_mirror == NULL && _byte_mirror == NULL  &&
-           _bool_mirror == NULL   && _char_mirror == NULL  &&
-           _long_mirror == NULL   && _short_mirror == NULL &&
-           _void_mirror == NULL, "mirrors should be NULL");
-  }
-#endif
-  f->do_oop(&_int_mirror);
-  f->do_oop(&_float_mirror);
-  f->do_oop(&_double_mirror);
-  f->do_oop(&_byte_mirror);
-  f->do_oop(&_bool_mirror);
-  f->do_oop(&_char_mirror);
-  f->do_oop(&_long_mirror);
-  f->do_oop(&_short_mirror);
-  f->do_oop(&_void_mirror);
+  DEBUG_ONLY(if (DumpSharedSpaces && !HeapShared::is_heap_object_archiving_allowed()) {
+      PRIMITIVE_MIRRORS_DO(ASSERT_MIRROR_NULL);
+    });
+  PRIMITIVE_MIRRORS_DO(SERIALIZE_MIRROR);
 #endif
 
   f->do_ptr((void**)&_the_array_interfaces_array);
@@ -296,11 +291,11 @@ void initialize_basic_type_klass(Klass* k, TRAPS) {
 }
 
 void Universe::genesis(TRAPS) {
-  ResourceMark rm;
+  ResourceMark rm(THREAD);
 
   { FlagSetting fs(_bootstrapping, true);
 
-    { MutexLocker mc(Compile_lock);
+    { MutexLocker mc(THREAD, Compile_lock);
 
       java_lang_Class::allocate_fixup_lists();
 
@@ -355,6 +350,8 @@ void Universe::genesis(TRAPS) {
     initialize_basic_type_klass(shortArrayKlassObj(), CHECK);
     initialize_basic_type_klass(intArrayKlassObj(), CHECK);
     initialize_basic_type_klass(longArrayKlassObj(), CHECK);
+
+    InstanceStackChunkKlass::init_offset_of_stack();
   } // end of core bootstrapping
 
   {
@@ -395,13 +392,8 @@ void Universe::genesis(TRAPS) {
     // so we allocate wherever, and hope that the first collection
     // moves these objects to the bottom of the old generation.
     // We can allocate directly in the permanent generation, so we do.
-    int size;
-    if (UseConcMarkSweepGC) {
-      log_warning(gc)("Using +FullGCALot with concurrent mark sweep gc will not force all objects to relocate");
-      size = FullGCALotDummies;
-    } else {
-      size = FullGCALotDummies * 2;
-    }
+    int size = FullGCALotDummies * 2;
+
     objArrayOop    naked_array = oopFactory::new_objArray(SystemDictionary::Object_klass(), size, CHECK);
     objArrayHandle dummy_array(THREAD, naked_array);
     int i = 0;
@@ -414,7 +406,7 @@ void Universe::genesis(TRAPS) {
       // Only modify the global variable inside the mutex.
       // If we had a race to here, the other dummy_array instances
       // and their elements just get dropped on the floor, which is fine.
-      MutexLocker ml(FullGCALot_lock);
+      MutexLocker ml(THREAD, FullGCALot_lock);
       if (_fullgc_alot_dummy_array == NULL) {
         _fullgc_alot_dummy_array = dummy_array();
       }
@@ -424,18 +416,18 @@ void Universe::genesis(TRAPS) {
   #endif
 }
 
+#define ASSERT_MIRROR_NOT_NULL(m) \
+  assert(m != NULL, "archived mirrors should not be NULL");
+
 void Universe::initialize_basic_type_mirrors(TRAPS) {
 #if INCLUDE_CDS_JAVA_HEAP
     if (UseSharedSpaces &&
         HeapShared::open_archive_heap_region_mapped() &&
         _int_mirror != NULL) {
       assert(HeapShared::is_heap_object_archiving_allowed(), "Sanity");
-      assert(_float_mirror != NULL && _double_mirror != NULL &&
-             _byte_mirror  != NULL && _byte_mirror   != NULL &&
-             _bool_mirror  != NULL && _char_mirror   != NULL &&
-             _long_mirror  != NULL && _short_mirror  != NULL &&
-             _void_mirror  != NULL, "Sanity");
+      PRIMITIVE_MIRRORS_DO(ASSERT_MIRROR_NOT_NULL);
     } else
+      // _int_mirror could be NULL if archived heap is not mapped.
 #endif
     {
       _int_mirror     =
@@ -522,7 +514,7 @@ bool Universe::has_reference_pending_list() {
 
 oop Universe::swap_reference_pending_list(oop list) {
   assert_pll_locked(is_locked);
-  return Atomic::xchg(list, &_reference_pending_list);
+  return Atomic::xchg(&_reference_pending_list, list);
 }
 
 #undef assert_pll_locked
@@ -555,7 +547,7 @@ void initialize_itable_for_klass(InstanceKlass* k, TRAPS) {
 
 
 void Universe::reinitialize_itables(TRAPS) {
-  MutexLocker mcld(ClassLoaderDataGraph_lock);
+  MutexLocker mcld(THREAD, ClassLoaderDataGraph_lock);
   ClassLoaderDataGraph::dictionary_classes_do(initialize_itable_for_klass, CHECK);
 }
 
@@ -591,7 +583,7 @@ oop Universe::gen_out_of_memory_error(oop default_err) {
   int next;
   if ((_preallocated_out_of_memory_error_avail_count > 0) &&
       SystemDictionary::Throwable_klass()->is_initialized()) {
-    next = (int)Atomic::add(-1, &_preallocated_out_of_memory_error_avail_count);
+    next = (int)Atomic::add(&_preallocated_out_of_memory_error_avail_count, -1);
     assert(next < (int)PreallocatedOutOfMemoryErrorCount, "avail count is corrupt");
   } else {
     next = -1;
@@ -710,7 +702,7 @@ jint universe_init() {
   }
 
 #if INCLUDE_CDS
-  if (DumpSharedSpaces || DynamicDumpSharedSpaces) {
+  if (Arguments::is_dumping_archive()) {
     MetaspaceShared::prepare_for_dumping();
   }
 #endif
@@ -957,7 +949,7 @@ bool universe_post_init() {
   // This needs to be done before the first scavenge/gc, since
   // it's an input to soft ref clearing policy.
   {
-    MutexLocker x(Heap_lock);
+    MutexLocker x(THREAD, Heap_lock);
     Universe::update_heap_info_at_gc();
   }
 
@@ -1224,10 +1216,10 @@ bool Universe::release_fullgc_alot_dummy() {
       _fullgc_alot_dummy_array = NULL;
       return false;
     }
-    if (!UseConcMarkSweepGC) {
-      // Release dummy at bottom of old generation
-      _fullgc_alot_dummy_array->obj_at_put(_fullgc_alot_dummy_next++, NULL);
-    }
+
+    // Release dummy at bottom of old generation
+    _fullgc_alot_dummy_array->obj_at_put(_fullgc_alot_dummy_next++, NULL);
+
     // Release dummy at bottom of permanent generation
     _fullgc_alot_dummy_array->obj_at_put(_fullgc_alot_dummy_next++, NULL);
   }

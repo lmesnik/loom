@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,7 +27,7 @@ package java.lang;
 
 import jdk.internal.HotSpotIntrinsicCandidate;
 import jdk.internal.vm.annotation.DontInline;
-import jdk.internal.vm.annotation.ForceInline;
+import sun.security.action.GetPropertyAction;
 
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
@@ -37,7 +37,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
 /**
@@ -126,6 +125,8 @@ public class Continuation {
     private final ContinuationScope scope;
     private Continuation parent; // null for native stack
     private Continuation child; // non-null when we're yielded in a child continuation
+
+    private jdk.internal.misc.StackChunk tail;
 
     // The content of the stack arrays is extremely security-sensitive. Writing can lead to arbitrary code execution, and reading can leak sensitive data
     private int[] stack = null; // grows down
@@ -327,6 +328,7 @@ public class Continuation {
                     this.entrySP = getSP(); // now getSP also resets fastpath; this is also done in thaw for the doContinue branch
                     enter(); // make this an invokevirtual rather than invokeinterface. Otherwise it freaks out the interpreter (currently solved by patching in native)
                 } else {
+                    assert !isEmpty();
                     doContinue(); // intrinsic. Jumps into yield, as a return from doYield    
                 }
             } finally {
@@ -334,6 +336,7 @@ public class Continuation {
                 try {
                 if (TRACE) System.out.println("run (after) sp: " + sp + " refSP: " + refSP + " maxSize: " + maxSize);
 
+                assert isEmpty() == done : "empty: " + isEmpty() + " done: " + done + " cont: " + Integer.toHexString(System.identityHashCode(this));
                 currentCarrierThread().setContinuation(this.parent);
                 if (parent != null)
                     parent.child = null;
@@ -376,11 +379,25 @@ public class Continuation {
             // assert doneX;
             // System.out.println("-- done!  " + id());
             if (TRACE) System.out.println(">>>>>>>> DONE <<<<<<<<<<<<< " + id());
+            assert isEmpty();
         }
     }
 
     private boolean isStarted() {
-        return stack != null && sp < stack.length;
+        return tail != null || (stack != null && sp < stack.length);
+    }
+
+    private boolean isEmpty() {
+        if (pc != 0) return false;
+        for (jdk.internal.misc.StackChunk c = tail; c != null; c = c.parent) {
+            if (!isEmpty(c))
+                return false;
+        }
+        return true;
+    }
+
+    private boolean isEmpty(jdk.internal.misc.StackChunk c) {
+        return c.sp >= c.size;
     }
 
     /**
@@ -457,12 +474,9 @@ public class Continuation {
             // this.sp = -1;
             // this.refStack = null;
             // this.refSP = -1;
+            this.tail = null;
         } else {
-            if (TRACE && origRefSP < refSP)
-                System.out.println("Nulling refs " + origRefSP + " (inclusive) - " + refSP + " (exclusive)");
-            for (int i = origRefSP; i < refSP; i++)
-                refStack[i] = null;
-
+            if (TRACE && origRefSP < refSP) System.out.println("Nulling refs " + origRefSP + " (inclusive) - " + refSP + " (exclusive)");
             maybeShrink();
         }
     }
@@ -554,8 +568,8 @@ public class Continuation {
     static private native int isPinned0(ContinuationScope scope);
 
     private void clean() {
-        if (!isStackEmpty())
-            clean0();
+        // if (!isStackEmpty())
+        //     clean0();
     }
 
     private boolean fence() {
@@ -860,7 +874,7 @@ public class Continuation {
         return Integer.toHexString(System.identityHashCode(this)) + " [" + currentCarrierThread().getId() + "]";
     }
 
-    private native void clean0();
+    // private native void clean0();
 
     /**
      * TBD
@@ -908,7 +922,7 @@ public class Continuation {
     }
 
     private static boolean isEmptyOrTrue(String property) {
-        final String value = System.getProperty(property);
+        String value = GetPropertyAction.privilegedGetProperty(property);
         if (value == null)
             return false;
         return value.isEmpty() || Boolean.parseBoolean(value);

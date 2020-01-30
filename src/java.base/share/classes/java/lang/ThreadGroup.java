@@ -52,9 +52,9 @@ import java.util.Arrays;
  * and working off of that snapshot, rather than holding the thread group locked
  * while we work on the children.
  */
-public
-class ThreadGroup implements Thread.UncaughtExceptionHandler {
+public class ThreadGroup implements Thread.UncaughtExceptionHandler {
     private final ThreadGroup parent;
+    private final boolean virtual;
     String name;
     int maxPriority;
     boolean destroyed;
@@ -75,6 +75,7 @@ class ThreadGroup implements Thread.UncaughtExceptionHandler {
         this.name = "system";
         this.maxPriority = Thread.MAX_PRIORITY;
         this.parent = null;
+        this.virtual = false;
     }
 
     /**
@@ -112,14 +113,19 @@ class ThreadGroup implements Thread.UncaughtExceptionHandler {
      * @since   1.0
      */
     public ThreadGroup(ThreadGroup parent, String name) {
-        this(checkParentAccess(parent), parent, name);
+        this(checkParentAccess(parent), parent, name, false);
     }
 
-    private ThreadGroup(Void unused, ThreadGroup parent, String name) {
+    ThreadGroup(ThreadGroup parent, String name, boolean virtual) {
+        this(null, parent, name, virtual);
+    }
+
+    private ThreadGroup(Void unused, ThreadGroup parent, String name, boolean virtual) {
         this.name = name;
         this.maxPriority = parent.maxPriority;
         this.daemon = parent.daemon;
         this.parent = parent;
+        this.virtual = virtual;
         parent.add(this);
     }
 
@@ -258,7 +264,7 @@ class ThreadGroup implements Thread.UncaughtExceptionHandler {
         ThreadGroup[] groupsSnapshot;
         synchronized (this) {
             checkAccess();
-            if (pri < Thread.MIN_PRIORITY || pri > Thread.MAX_PRIORITY) {
+            if (virtual || (pri < Thread.MIN_PRIORITY || pri > Thread.MAX_PRIORITY)) {
                 return;
             }
             maxPriority = (parent != null) ? Math.min(pri, parent.maxPriority) : pri;
@@ -666,8 +672,8 @@ class ThreadGroup implements Thread.UncaughtExceptionHandler {
      * @deprecated    This method is inherently deadlock-prone.  See
      *     {@link Thread#suspend} for details.
      */
-    @Deprecated(since="1.2")
-    @SuppressWarnings("deprecation")
+    @Deprecated(since="1.2", forRemoval=true)
+    @SuppressWarnings("removal")
     public final void suspend() {
         if (stopOrSuspend(true))
             Thread.currentThread().suspend();
@@ -680,7 +686,7 @@ class ThreadGroup implements Thread.UncaughtExceptionHandler {
      * if (and only if) the current thread is found to be in this thread
      * group or one of its subgroups.
      */
-    @SuppressWarnings("deprecation")
+    @SuppressWarnings({"deprecation", "removal"})
     private boolean stopOrSuspend(boolean suspend) {
         boolean suicide = false;
         Thread us = Thread.currentThread();
@@ -729,8 +735,8 @@ class ThreadGroup implements Thread.UncaughtExceptionHandler {
      *       both of which have been deprecated, as they are inherently
      *       deadlock-prone.  See {@link Thread#suspend} for details.
      */
-    @Deprecated(since="1.2")
-    @SuppressWarnings("deprecation")
+    @Deprecated(since="1.2", forRemoval=true)
+    @SuppressWarnings("removal")
     public final void resume() {
         int ngroupsSnapshot;
         ThreadGroup[] groupsSnapshot;
@@ -759,6 +765,8 @@ class ThreadGroup implements Thread.UncaughtExceptionHandler {
      * First, the {@code checkAccess} method of this thread group is
      * called with no arguments; this may result in a security exception.
      *
+     * @throws     UnsupportedOperationException if this is the thread group
+     *               for virtual threads
      * @throws     IllegalThreadStateException  if the thread group is not
      *               empty or if the thread group has already been destroyed.
      * @throws     SecurityException  if the current thread cannot modify this
@@ -767,6 +775,8 @@ class ThreadGroup implements Thread.UncaughtExceptionHandler {
      * @since      1.0
      */
     public final void destroy() {
+        if (virtual)
+            throw new UnsupportedOperationException();
         int ngroupsSnapshot;
         ThreadGroup[] groupsSnapshot;
         synchronized (this) {
@@ -1070,9 +1080,9 @@ class ThreadGroup implements Thread.UncaughtExceptionHandler {
      *             which is deprecated.  Further, the behavior of this call
      *             was never specified.
      */
-    @Deprecated(since="1.2")
+    @Deprecated(since="1.2", forRemoval=true)
     public boolean allowThreadSuspension(boolean b) {
-        return true;
+        return (virtual) ? !b : true;
     }
 
     /**

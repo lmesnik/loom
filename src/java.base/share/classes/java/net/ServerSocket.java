@@ -32,6 +32,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.Collections;
 
+import sun.security.util.SecurityConstants;
 import sun.net.PlatformSocketImpl;
 
 /**
@@ -45,14 +46,42 @@ import sun.net.PlatformSocketImpl;
  * implementation to configure itself to create sockets
  * appropriate to the local firewall.
  *
+ * <p> The {@code ServerSocket} class defines convenience
+ * methods to set and get several socket options. This class also
+ * defines the {@link #setOption(SocketOption, Object) setOption}
+ * and {@link #getOption(SocketOption) getOption} methods to set
+ * and query socket options.
+ * A {@code ServerSocket} supports the following options:
+ * <blockquote>
+ * <table class="striped">
+ * <caption style="display:none">Socket options</caption>
+ * <thead>
+ *   <tr>
+ *     <th scope="col">Option Name</th>
+ *     <th scope="col">Description</th>
+ *   </tr>
+ * </thead>
+ * <tbody>
+ *   <tr>
+ *     <th scope="row"> {@link java.net.StandardSocketOptions#SO_RCVBUF SO_RCVBUF} </th>
+ *     <td> The size of the socket receive buffer </td>
+ *   </tr>
+ *   <tr>
+ *     <th scope="row"> {@link java.net.StandardSocketOptions#SO_REUSEADDR SO_REUSEADDR} </th>
+ *     <td> Re-use address </td>
+ *   </tr>
+ * </tbody>
+ * </table>
+ * </blockquote>
+ * Additional (implementation specific) options may also be supported.
+ *
  * @author  unascribed
  * @see     java.net.SocketImpl
  * @see     java.net.ServerSocket#setSocketFactory(java.net.SocketImplFactory)
  * @see     java.nio.channels.ServerSocketChannel
  * @since   1.0
  */
-public
-class ServerSocket implements java.io.Closeable {
+public class ServerSocket implements java.io.Closeable {
     /**
      * Various states of this socket.
      */
@@ -73,11 +102,23 @@ class ServerSocket implements java.io.Closeable {
      *
      * @throws     NullPointerException if impl is {@code null}.
      *
+     * @throws     SecurityException if a security manager is set and
+     *             its {@code checkPermission} method doesn't allow
+     *             {@code NetPermission("setSocketImpl")}.
      * @since 12
      */
     protected ServerSocket(SocketImpl impl) {
         Objects.requireNonNull(impl);
+        checkPermission();
         this.impl = impl;
+    }
+
+    private static Void checkPermission() {
+        SecurityManager sm = System.getSecurityManager();
+        if (sm != null) {
+            sm.checkPermission(SecurityConstants.SET_SOCKETIMPL_PERMISSION);
+        }
+        return null;
     }
 
     /**
@@ -736,14 +777,15 @@ class ServerSocket implements java.io.Closeable {
 
     /**
      * Enable/disable {@link SocketOptions#SO_TIMEOUT SO_TIMEOUT} with the
-     * specified timeout, in milliseconds.  With this option set to a non-zero
-     * timeout, a call to accept() for this ServerSocket
+     * specified timeout, in milliseconds.  With this option set to a positive
+     * timeout value, a call to accept() for this ServerSocket
      * will block for only this amount of time.  If the timeout expires,
      * a <B>java.net.SocketTimeoutException</B> is raised, though the
-     * ServerSocket is still valid.  The option <B>must</B> be enabled
-     * prior to entering the blocking operation to have effect.  The
-     * timeout must be {@code > 0}.
-     * A timeout of zero is interpreted as an infinite timeout.
+     * ServerSocket is still valid. A timeout of zero is interpreted as an
+     * infinite timeout.
+     * The option <B>must</B> be enabled prior to entering the blocking
+     * operation to have effect.
+     *
      * @param timeout the specified timeout, in milliseconds
      * @throws  SocketException if there is an error in the underlying protocol,
      *          such as a TCP error

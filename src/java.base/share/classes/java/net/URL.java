@@ -45,6 +45,7 @@ import java.util.ServiceLoader;
 
 import jdk.internal.access.JavaNetURLAccess;
 import jdk.internal.access.SharedSecrets;
+import jdk.internal.misc.VM;
 import sun.net.util.IPAddressUtil;
 import sun.security.util.SecurityConstants;
 import sun.security.action.GetPropertyAction;
@@ -482,6 +483,16 @@ public final class URL implements java.io.Serializable {
             String s = IPAddressUtil.checkExternalForm(this);
             if (s != null) {
                 throw new MalformedURLException(s);
+            }
+        }
+        if ("jar".equalsIgnoreCase(protocol)) {
+            if (handler instanceof sun.net.www.protocol.jar.Handler) {
+                // URL.openConnection() would throw a confusing exception
+                // so generate a better exception here instead.
+                String s = ((sun.net.www.protocol.jar.Handler) handler).checkNestedProtocol(file);
+                if (s != null) {
+                    throw new MalformedURLException(s);
+                }
             }
         }
     }
@@ -1421,7 +1432,7 @@ public final class URL implements java.io.Serializable {
         boolean checkedWithFactory = false;
         boolean overrideableProtocol = isOverrideable(protocol);
 
-        if (overrideableProtocol && jdk.internal.misc.VM.isBooted()) {
+        if (overrideableProtocol && VM.isBooted()) {
             // Use the factory (if any). Volatile read makes
             // URLStreamHandlerFactory appear fully initialized to current thread.
             fac = factory;
@@ -1655,7 +1666,9 @@ public final class URL implements java.io.Serializable {
     }
 
     boolean isBuiltinStreamHandler(URLStreamHandler handler) {
-       return isBuiltinStreamHandler(handler.getClass().getName());
+       Class<?> handlerClass = handler.getClass();
+       return isBuiltinStreamHandler(handlerClass.getName())
+                 || VM.isSystemDomainLoader(handlerClass.getClassLoader());
     }
 
     private boolean isBuiltinStreamHandler(String handlerClassName) {
