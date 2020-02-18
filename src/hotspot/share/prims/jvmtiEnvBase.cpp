@@ -1021,12 +1021,12 @@ JvmtiEnvBase::get_frame_location(oop vthread_oop, jint depth,
 }
 
 
-// If can_support_fibers capability is enabled and there is a virtual thread mounted
+// If can_support_virtual_threads capability is enabled and there is a virtual thread mounted
 // to the JavaThread* then return virtual thread oop. Otherwise, return thread oop.
 oop
 JvmtiEnvBase::get_vthread_or_thread_oop(JavaThread* thread) {
   oop thread_oop = thread->threadObj();
-  if (get_capabilities()->can_support_fibers) {
+  if (get_capabilities()->can_support_virtual_threads) {
     oop vthread_oop = java_lang_Thread::vthread(thread_oop);
     if (vthread_oop != NULL) {
       thread_oop = vthread_oop;
@@ -1310,7 +1310,7 @@ VM_GetMultipleStackTraces::fill_frames(jthread jt, JavaThread *thr, oop thread_o
 
   // Support for virtual threads
   if (java_lang_VirtualThread::is_instance(thread_oop)) {
-    // The can_support_fibers capability is checked by the caller.
+    // The can_support_virtual_threads capability is checked by the caller.
     // TBD: check virtual thread state
     javaVFrame *jvf = get_vthread_jvf(Thread::current(), thread_oop);
     infop->frame_buffer = NEW_RESOURCE_ARRAY(jvmtiFrameInfo, max_frame_count());
@@ -1411,7 +1411,7 @@ VM_GetThreadListStackTraces::doit() {
       // We have a valid thread_oop.
     }
     if (java_lang_VirtualThread::is_instance(thread_oop)) {
-      if (!env()->get_capabilities()->can_support_fibers) {
+      if (!env()->get_capabilities()->can_support_virtual_threads) {
         set_result(JVMTI_ERROR_MUST_POSSESS_CAPABILITY);
         return;
       }
@@ -1802,3 +1802,22 @@ VM_VirtualThreadGetFrameLocation::doit() {
   _result = ((JvmtiEnvBase*)_env)->get_frame_location(_vthread_h(), _depth,
                                                       _method_ptr, _location_ptr);
 }
+
+void
+VM_VirtualThreadGetThreadState::doit() {
+  jshort vthread_state = java_lang_VirtualThread::state(_vthread_h());
+  oop carrier_thread_oop = java_lang_VirtualThread::carrier_thread(_vthread_h());
+  jint state;
+
+  if (vthread_state == java_lang_VirtualThread::RUNNING && carrier_thread_oop != NULL) {
+    state = java_lang_Thread::get_thread_status(carrier_thread_oop);
+  } else {
+    state = (jint) java_lang_VirtualThread::map_state_to_thread_status(vthread_state);
+  }
+  if (java_lang_Thread::interrupted(_vthread_h())) {
+    state |= JVMTI_THREAD_STATE_INTERRUPTED;
+  }
+  *_state_ptr = state;
+  _result = JVMTI_ERROR_NONE;
+}
+

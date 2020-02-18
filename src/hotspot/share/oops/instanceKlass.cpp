@@ -1170,7 +1170,7 @@ void InstanceKlass::add_implementor(Klass* k) {
   Klass* ik = implementor();
   if (ik == NULL) {
     set_implementor(k);
-  } else if (ik != this) {
+  } else if (ik != this && ik != k) {
     // There is already an implementor. Use itself as an indicator of
     // more than one implementors.
     set_implementor(this);
@@ -1397,6 +1397,10 @@ void InstanceKlass::mask_for(const methodHandle& method, int bci,
   oop_map_cache->lookup(method, bci, entry_for);
 }
 
+bool InstanceKlass::contains_field_offset(int offset) {
+  fieldDescriptor fd;
+  return find_field_from_offset(offset, false, &fd);
+}
 
 bool InstanceKlass::find_local_field(Symbol* name, Symbol* sig, fieldDescriptor* fd) const {
   for (JavaFieldStream fs(this); !fs.done(); fs.next()) {

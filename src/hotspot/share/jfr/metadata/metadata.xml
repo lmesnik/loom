@@ -86,6 +86,7 @@
 
   <Event name="ContinuationFreeze" category="Java Application" label="Continuation Yield" description="Invocation of Continuation.yield()"
     thread="true" stackTrace="true">
+    <Field type="Thread" name="carrierThread" label="Carrier Thread" description="Thread enlisted as a carrier" />
     <Field type="Class" name="contClass" label="Continuation class" description="Class of the continuation" />
     <Field type="ushort" name="numFrames" label="Number of frames" />
     <Field type="ushort" name="numIFrames" label="Number of interpreted frames" />
@@ -95,6 +96,7 @@
 
   <Event name="ContinuationThaw" category="Java Application" label="Continuation Continue" description="Invocation of Continuation.run() on a started continuation"
     thread="true" stackTrace="true">
+    <Field type="Thread" name="carrierThread" label="Carrier Thread" description="Thread enlisted as a carrier" />
     <Field type="Class" name="contClass" label="Continuation class" description="Class of the continuation" />
     <Field type="ushort" name="numFrames" label="Number of frames" />
     <Field type="ushort" name="numIFrames" label="Number of interpreted frames" />
@@ -1080,6 +1082,13 @@
     <Field type="ulong" contentType="bytes" name="size" label="Size Written" />
   </Event>
 
+  <Event name="HeapDump" category="Java Virtual Machine, Diagnostics" label="Heap Dump" stackTrace="true" thread="true">
+    <Field type="string" name="destination" label="Destination" />
+    <Field type="long" name="size" label="Size" />
+    <Field type="boolean" name="gcBeforeDump" label="GC Before Dump" />
+    <Field type="boolean" name="onOutOfMemoryError" label="On Out of Memory Error" />
+  </Event>
+
   <Type name="DeoptimizationReason" label="Deoptimization Reason">
     <Field type="string" name="reason" label="Reason" />
   </Type>
@@ -1114,6 +1123,7 @@
     <Field type="string" name="javaName" label="Java Thread Name" />
     <Field type="long" name="javaThreadId" label="Java Thread Id" />
     <Field type="ThreadGroup" name="group" label="Java Thread Group" />
+    <Field type="boolean" name="isVirtual" label="Virtual Thread" />
   </Type>
 
   <Type name="ThreadGroup" label="Thread Group">

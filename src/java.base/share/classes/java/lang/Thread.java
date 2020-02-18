@@ -270,8 +270,41 @@ public class Thread implements Runnable {
         return currentThread0();
     }
 
+    // Scoped support:
+
+    /**
+     * TBD
+     * @return TBD
+     */
     @HotSpotIntrinsicCandidate
-    private static native Thread currentThread0();
+    static native Object[] scopedCache();
+
+    @HotSpotIntrinsicCandidate
+    static native void setScopedCache(Object[] cache);
+
+    // A simple (not very) random string of bits to use when evicting
+    // cache entries.
+    int victims
+        = 0b1100_1001_0000_1111_1101_1010_1010_0010;
+
+    private ScopedMap scopedMap;
+
+    final ScopedMap scopedMap() {
+        var map = scopedMap;
+        if (map == null) {
+            map = scopedMap = new ScopedMap();
+        }
+        return map;
+    }
+
+    // end Scoped support
+
+    /**
+     * TBD
+     * @return TBD
+     */
+    @HotSpotIntrinsicCandidate
+    static native Thread currentThread0();
 
     /**
      * A hint to the scheduler that the current thread is willing to yield
@@ -720,12 +753,6 @@ public class Thread implements Runnable {
         Builder uncaughtExceptionHandler(UncaughtExceptionHandler ueh);
 
         /**
-         * The thread is <em>managed</em>.
-         * @return this builder
-         */
-        Builder managed();
-
-        /**
          * Sets the task for the thread to run.
          * @param task the task to run
          * @return this builder
@@ -879,12 +906,6 @@ public class Thread implements Runnable {
         @Override
         public Builder uncaughtExceptionHandler(UncaughtExceptionHandler ueh) {
             this.uhe = Objects.requireNonNull(ueh);
-            return this;
-        }
-
-        @Override
-        public Builder managed() {
-            // TDB
             return this;
         }
 
@@ -1384,15 +1405,8 @@ public class Thread implements Runnable {
      */
     public static final int INHERIT_THREAD_LOCALS = 1 << 2;
 
-    /**
-     * Characteristic value signifying that the thread is <em>managed.</em>
-     *
-     * @since 99
-     */
-    public static final int MANAGED = 1 << 3;
-
     private static int validCharacteristics() {
-        return (VIRTUAL | NO_THREAD_LOCALS | INHERIT_THREAD_LOCALS | MANAGED);
+        return (VIRTUAL | NO_THREAD_LOCALS | INHERIT_THREAD_LOCALS);
     }
 
     private static void checkCharacteristics(int characteristics) {
@@ -2985,6 +2999,11 @@ public class Thread implements Runnable {
 
     /** Secondary seed isolated from public ThreadLocalRandom sequence */
     int threadLocalRandomSecondarySeed;
+
+    /**
+     * TBD
+     */
+    public Object userObject;
 
     /* Some private helper methods */
     private native void setPriority0(int newPriority);

@@ -253,6 +253,7 @@ class LIRGenerator: public InstructionVisitor, public BlockClosure {
   void do_isPrimitive(Intrinsic* x);
   void do_getClass(Intrinsic* x);
   void do_currentThread(Intrinsic* x);
+  void do_scopedCache(Intrinsic* x);
   void do_FmaIntrinsic(Intrinsic* x);
   void do_MathIntrinsic(Intrinsic* x);
   void do_LibmIntrinsic(Intrinsic* x);
@@ -478,7 +479,7 @@ class LIRGenerator: public InstructionVisitor, public BlockClosure {
 
 #ifdef JFR_HAVE_INTRINSICS
   void do_ClassIDIntrinsic(Intrinsic* x);
-  void do_getEventWriter(Intrinsic* x);
+  // void do_getEventWriter(Intrinsic* x);
 #endif
 
   void do_RuntimeCall(address routine, Intrinsic* x);

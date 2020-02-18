@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -258,11 +258,13 @@ class LibraryCallKit : public GraphKit {
   bool inline_unsafe_writebackSync0(bool is_pre);
   bool inline_unsafe_copyMemory();
   bool inline_native_currentThread();
+  bool inline_native_scopedCache();
+  bool inline_native_setScopedCache();
 
   bool inline_native_time_funcs(address method, const char* funcName);
 #ifdef JFR_HAVE_INTRINSICS
   bool inline_native_classID();
-  bool inline_native_getEventWriter();
+  // bool inline_native_getEventWriter();
 #endif
   bool inline_native_Class_query(vmIntrinsics::ID id);
   bool inline_native_subtype_check();
@@ -758,10 +760,13 @@ bool LibraryCallKit::try_to_inline(int predicate) {
 
   case vmIntrinsics::_currentThread:            return inline_native_currentThread();
 
+  case vmIntrinsics::_scopedCache:              return inline_native_scopedCache();
+  case vmIntrinsics::_setScopedCache:           return inline_native_setScopedCache();
+
 #ifdef JFR_HAVE_INTRINSICS
   case vmIntrinsics::_counterTime:              return inline_native_time_funcs(CAST_FROM_FN_PTR(address, JFR_TIME_FUNCTION), "counterTime");
   case vmIntrinsics::_getClassId:               return inline_native_classID();
-  case vmIntrinsics::_getEventWriter:           return inline_native_getEventWriter();
+  // case vmIntrinsics::_getEventWriter:           return inline_native_getEventWriter();
 #endif
   case vmIntrinsics::_currentTimeMillis:        return inline_native_time_funcs(CAST_FROM_FN_PTR(address, os::javaTimeMillis), "currentTimeMillis");
   case vmIntrinsics::_nanoTime:                 return inline_native_time_funcs(CAST_FROM_FN_PTR(address, os::javaTimeNanos), "nanoTime");
@@ -1803,8 +1808,15 @@ bool LibraryCallKit::inline_string_char_access(bool is_store) {
 //--------------------------round_double_node--------------------------------
 // Round a double node if necessary.
 Node* LibraryCallKit::round_double_node(Node* n) {
-  if (Matcher::strict_fp_requires_explicit_rounding && UseSSE <= 1)
-    n = _gvn.transform(new RoundDoubleNode(0, n));
+  if (Matcher::strict_fp_requires_explicit_rounding) {
+#ifdef IA32
+    if (UseSSE < 2) {
+      n = _gvn.transform(new RoundDoubleNode(NULL, n));
+    }
+#else
+    Unimplemented();
+#endif // IA32
+  }
   return n;
 }
 
@@ -2995,6 +3007,8 @@ bool LibraryCallKit::inline_native_classID() {
 
 }
 
+/*
+
 bool LibraryCallKit::inline_native_getEventWriter() {
   Node* tls_ptr = _gvn.transform(new ThreadLocalNode());
 
@@ -3032,12 +3046,48 @@ bool LibraryCallKit::inline_native_getEventWriter() {
   return true;
 }
 
+*/
+
 #endif // JFR_HAVE_INTRINSICS
 
 //------------------------inline_native_currentThread------------------
 bool LibraryCallKit::inline_native_currentThread() {
   Node* junk = NULL;
   set_result(generate_current_thread(junk));
+  return true;
+}
+
+//------------------------inline_native_scopedCache------------------
+bool LibraryCallKit::inline_native_scopedCache() {
+  ciKlass *objects_klass = ciObjArrayKlass::make(env()->Object_klass());
+  const TypeOopPtr *etype = TypeOopPtr::make_from_klass(env()->Object_klass());
+
+  // It might be nice to eliminate the bounds check on the cache array
+  // by replacing TypeInt::POS here with
+  // TypeInt::make(ScopedCacheSize*2), but this causes a performance
+  // regression in some test cases.
+  const TypeAry* arr0 = TypeAry::make(etype, TypeInt::POS);
+  bool xk = etype->klass_is_exact();
+
+  // Because we create the scoped cache lazily we have to make the
+  // type of the result BotPTR.
+  const Type* objects_type = TypeAryPtr::make(TypePtr::BotPTR, arr0, objects_klass, xk, 0);
+  Node* thread = _gvn.transform(new ThreadLocalNode());
+  Node* p = basic_plus_adr(top()/*!oop*/, thread, in_bytes(JavaThread::scopedCache_offset()));
+  Node* threadObj = make_load(NULL, p, objects_type, T_OBJECT, MemNode::unordered);
+  set_result(threadObj);
+
+  return true;
+}
+
+//------------------------inline_native_setScopedCache------------------
+bool LibraryCallKit::inline_native_setScopedCache() {
+  Node* arr = argument(0);
+  Node* thread = _gvn.transform(new ThreadLocalNode());
+  Node* p = basic_plus_adr(top()/*!oop*/, thread, in_bytes(JavaThread::scopedCache_offset()));
+  const TypePtr *adr_type = _gvn.type(p)->isa_ptr();
+  store_to_memory(control(), p, arr, T_OBJECT, adr_type, MemNode::unordered);
+
   return true;
 }
 

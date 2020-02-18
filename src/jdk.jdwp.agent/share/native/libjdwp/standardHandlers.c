@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -106,7 +106,7 @@ handleFrameEvent(JNIEnv *env, EventInfo *evinfo,
     FrameNumber fnum = 0;
     jvalue returnValue;
 
-    JDI_ASSERT(!isFiber(evinfo->thread));
+    JDI_ASSERT(!isVThread(evinfo->thread));
     error = JVMTI_FUNC_PTR(gdata->jvmti,GetFrameLocation)
             (gdata->jvmti, evinfo->thread, fnum, &method, &location);
     if (error != JVMTI_ERROR_NONE) {
@@ -152,10 +152,10 @@ standardHandlers_defaultHandler(EventIndex ei)
         case EI_MONITOR_CONTENDED_ENTERED:
         case EI_MONITOR_WAIT:
         case EI_MONITOR_WAITED:
-        case EI_FIBER_SCHEDULED:
-        case EI_FIBER_TERMINATED:
-        case EI_FIBER_MOUNT:
-        case EI_FIBER_UNMOUNT:
+        case EI_VIRTUAL_THREAD_SCHEDULED:
+        case EI_VIRTUAL_THREAD_TERMINATED:
+        case EI_VIRTUAL_THREAD_MOUNTED:
+        case EI_VIRTUAL_THREAD_UNMOUNTED:
         case EI_CONTINUATION_RUN:
         case EI_CONTINUATION_YIELD:
             return &genericHandler;

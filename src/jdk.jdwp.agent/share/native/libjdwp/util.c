@@ -178,7 +178,7 @@ util_initialize(JNIEnv *env)
 
         jvmtiError error;
         jclass localClassClass;
-        jclass localFiberClass;
+        jclass localVirtualThreadClass;
         jclass localThreadClass;
         jclass localThreadGroupClass;
         jclass localClassLoaderClass;
@@ -195,7 +195,7 @@ util_initialize(JNIEnv *env)
         /* Find some standard classes */
 
         localClassClass         = findClass(env,"java/lang/Class");
-        localFiberClass         = findClass(env,"java/lang/VirtualThread");
+        localVirtualThreadClass = findClass(env,"java/lang/VirtualThread");
         localThreadClass        = findClass(env,"java/lang/Thread");
         localThreadGroupClass   = findClass(env,"java/lang/ThreadGroup");
         localClassLoaderClass   = findClass(env,"java/lang/ClassLoader");
@@ -205,13 +205,13 @@ util_initialize(JNIEnv *env)
 
         /* Save references */
 
-        saveGlobalRef(env, localClassClass,       &(gdata->classClass));
-        saveGlobalRef(env, localFiberClass,       &(gdata->fiberClass));
-        saveGlobalRef(env, localThreadClass,      &(gdata->threadClass));
-        saveGlobalRef(env, localThreadGroupClass, &(gdata->threadGroupClass));
-        saveGlobalRef(env, localClassLoaderClass, &(gdata->classLoaderClass));
-        saveGlobalRef(env, localStringClass,      &(gdata->stringClass));
-        saveGlobalRef(env, localSystemClass,      &(gdata->systemClass));
+        saveGlobalRef(env, localClassClass,         &(gdata->classClass));
+        saveGlobalRef(env, localVirtualThreadClass, &(gdata->virtualThreadClass));
+        saveGlobalRef(env, localThreadClass,        &(gdata->threadClass));
+        saveGlobalRef(env, localThreadGroupClass,   &(gdata->threadGroupClass));
+        saveGlobalRef(env, localClassLoaderClass,   &(gdata->classLoaderClass));
+        saveGlobalRef(env, localStringClass,        &(gdata->stringClass));
+        saveGlobalRef(env, localSystemClass,        &(gdata->systemClass));
 
         /* Find some standard methods */
 
@@ -310,8 +310,8 @@ specificTypeKey(JNIEnv *env, jobject object)
         return JDWP_TAG(OBJECT);
     } else if (JNI_FUNC_PTR(env,IsInstanceOf)(env, object, gdata->stringClass)) {
         return JDWP_TAG(STRING);
-    } else if (JNI_FUNC_PTR(env,IsInstanceOf)(env, object, gdata->fiberClass)) {
-        /* We don't really need to check if it's an instance of a Fiber class since
+    } else if (JNI_FUNC_PTR(env,IsInstanceOf)(env, object, gdata->virtualThreadClass)) {
+        /* We don't really need to check if it's an instance of a VirtualThread class since
          * that would get detected below, but this is a bit faster. At one point
          * it was thought that we would need to return THREAD here instead of OBJECT,
          * but that's not the case. */
@@ -610,9 +610,9 @@ sharedInvoke(PacketInputStream *in, PacketOutputStream *out)
         return JNI_TRUE;
     }
 
-    /* Don't try this with unmounted fibers. */
-    if (isFiber(thread)) {
-        thread = getFiberThread(thread);
+    /* Don't try this with unmounted vthreads. */
+    if (isVThread(thread)) {
+        thread = getVThreadThread(thread);
     }
     if (thread == NULL) {
         error = JVMTI_ERROR_THREAD_NOT_SUSPENDED;
@@ -842,44 +842,44 @@ fieldSignature(jclass clazz, jfieldID field,
 }
 
 /**
- * Return fiber that is running on specified thread (must be inside a WITH_LOCAL_REFS)
+ * Return vthread that is running on specified thread (must be inside a WITH_LOCAL_REFS)
  */
 jthread
-getThreadFiber(jthread thread)
+getThreadVThread(jthread thread)
 {
-    jthread fiber;
+    jthread vthread;
     jvmtiError error;
 
-    JDI_ASSERT(gdata->fibersSupported);
+    JDI_ASSERT(gdata->vthreadsSupported);
     if ( thread == NULL ) {
         return NULL;
     }
-    error = JVMTI_FUNC_PTR(gdata->jvmti,GetThreadFiber)
-        (gdata->jvmti, thread, &fiber);
+    error = JVMTI_FUNC_PTR(gdata->jvmti,GetVirtualThread)
+        (gdata->jvmti, thread, &vthread);
     if ( error != JVMTI_ERROR_NONE ) {
-        EXIT_ERROR(error,"Error calling GetThreadFiber()");
+        EXIT_ERROR(error,"Error calling GetVirtualThread()");
         return JNI_FALSE;
     }
-    return fiber;
+    return vthread;
 }
 
 /**
- * Return thread that specified fiber is running on (must be inside a WITH_LOCAL_REFS)
+ * Return thread that specified vthread is running on (must be inside a WITH_LOCAL_REFS)
  */
 jthread
-getFiberThread(jthread fiber)
+getVThreadThread(jthread vthread)
 {
     jthread thread;
     jvmtiError error;
 
-    JDI_ASSERT(gdata->fibersSupported);
-    if ( fiber == NULL ) {
+    JDI_ASSERT(gdata->vthreadsSupported);
+    if ( vthread == NULL ) {
         return NULL;
     }
-    error = JVMTI_FUNC_PTR(gdata->jvmti,GetFiberThread)
-        (gdata->jvmti, fiber, &thread);
+    error = JVMTI_FUNC_PTR(gdata->jvmti,GetCarrierThread)
+        (gdata->jvmti, vthread, &thread);
     if ( error != JVMTI_ERROR_NONE ) {
-        EXIT_ERROR(error,"Error calling GetFiberThread()");
+        EXIT_ERROR(error,"Error calling GetCarrierThread()");
         return NULL;
     }
     return thread;
@@ -1661,10 +1661,10 @@ isClass(jobject object)
 }
 
 jboolean
-isFiber(jobject object)
+isVThread(jobject object)
 {
     JNIEnv *env = getEnv();
-    return JNI_FUNC_PTR(env,IsInstanceOf)(env, object, gdata->fiberClass);
+    return JNI_FUNC_PTR(env,IsInstanceOf)(env, object, gdata->virtualThreadClass);
 }
 
 jboolean
@@ -2047,10 +2047,10 @@ eventIndexInit(void)
     index2jvmti[EI_MONITOR_WAITED     -EI_min] = JVMTI_EVENT_MONITOR_WAITED;
     index2jvmti[EI_VM_INIT            -EI_min] = JVMTI_EVENT_VM_INIT;
     index2jvmti[EI_VM_DEATH           -EI_min] = JVMTI_EVENT_VM_DEATH;
-    index2jvmti[EI_FIBER_SCHEDULED    -EI_min] = JVMTI_EVENT_FIBER_SCHEDULED;
-    index2jvmti[EI_FIBER_TERMINATED   -EI_min] = JVMTI_EVENT_FIBER_TERMINATED;
-    index2jvmti[EI_FIBER_MOUNT        -EI_min] = JVMTI_EVENT_FIBER_MOUNT;
-    index2jvmti[EI_FIBER_UNMOUNT      -EI_min] = JVMTI_EVENT_FIBER_UNMOUNT;
+    index2jvmti[EI_VIRTUAL_THREAD_SCHEDULED    -EI_min] = JVMTI_EVENT_VIRTUAL_THREAD_SCHEDULED;
+    index2jvmti[EI_VIRTUAL_THREAD_TERMINATED   -EI_min] = JVMTI_EVENT_VIRTUAL_THREAD_TERMINATED;
+    index2jvmti[EI_VIRTUAL_THREAD_MOUNTED      -EI_min] = JVMTI_EVENT_VIRTUAL_THREAD_MOUNTED;
+    index2jvmti[EI_VIRTUAL_THREAD_UNMOUNTED    -EI_min] = JVMTI_EVENT_VIRTUAL_THREAD_UNMOUNTED;
     index2jvmti[EI_CONTINUATION_RUN   -EI_min] = JVMTI_EVENT_CONTINUATION_RUN;
     index2jvmti[EI_CONTINUATION_YIELD -EI_min] = JVMTI_EVENT_CONTINUATION_YIELD;
 
@@ -2074,13 +2074,13 @@ eventIndexInit(void)
     index2jdwp[EI_MONITOR_WAITED      -EI_min] = JDWP_EVENT(MONITOR_WAITED);
     index2jdwp[EI_VM_INIT             -EI_min] = JDWP_EVENT(VM_INIT);
     index2jdwp[EI_VM_DEATH            -EI_min] = JDWP_EVENT(VM_DEATH);
-    /* Just map FIBER_SCHEDULED/TERMINATED to THREAD_START/END. */
-    index2jdwp[EI_FIBER_SCHEDULED     -EI_min] = JDWP_EVENT(THREAD_START);
-    index2jdwp[EI_FIBER_TERMINATED    -EI_min] = JDWP_EVENT(THREAD_END);
-    /* fiber fixme: these don't actually map to anything in JDWP. Need a way to make them
+    /* Just map VIRTUAL_THREAD_SCHEDULED/TERMINATED to THREAD_START/END. */
+    index2jdwp[EI_VIRTUAL_THREAD_SCHEDULED     -EI_min] = JDWP_EVENT(THREAD_START);
+    index2jdwp[EI_VIRTUAL_THREAD_TERMINATED    -EI_min] = JDWP_EVENT(THREAD_END);
+    /* vthread fixme: these don't actually map to anything in JDWP. Need a way to make them
      * produce an error if referenced. */
-    index2jdwp[EI_FIBER_MOUNT         -EI_min] = -1;
-    index2jdwp[EI_FIBER_UNMOUNT       -EI_min] = -1;
+    index2jdwp[EI_VIRTUAL_THREAD_MOUNTED       -EI_min] = -1;
+    index2jdwp[EI_VIRTUAL_THREAD_UNMOUNTED     -EI_min] = -1;
     index2jdwp[EI_CONTINUATION_RUN    -EI_min] = -1;
     index2jdwp[EI_CONTINUATION_YIELD  -EI_min] = -1;
 }
@@ -2148,14 +2148,14 @@ eventIndex2EventName(EventIndex ei)
             return "EI_VM_INIT";
         case EI_VM_DEATH:
             return "EI_VM_DEATH";
-        case EI_FIBER_SCHEDULED:
-            return "EI_FIBER_SCHEDULED";
-        case EI_FIBER_TERMINATED:
-            return "EI_FIBER_TERMINATED";
-        case EI_FIBER_MOUNT:
-            return "EI_FIBER_MOUNT";
-        case EI_FIBER_UNMOUNT:
-            return "EI_FIBER_UNMOUNT";
+        case EI_VIRTUAL_THREAD_SCHEDULED:
+            return "EI_VIRTUAL_THREAD_SCHEDULED";
+        case EI_VIRTUAL_THREAD_TERMINATED:
+            return "EI_VIRTUAL_THREAD_TERMINATED";
+        case EI_VIRTUAL_THREAD_MOUNTED:
+            return "EI_VIRTUAL_THREAD_MOUNTED";
+        case EI_VIRTUAL_THREAD_UNMOUNTED:
+            return "EI_VIRTUAL_THREAD_UNMOUNTED";
         case EI_CONTINUATION_RUN:
             return "EI_CONTINUATION_RUN";
         case EI_CONTINUATION_YIELD:
@@ -2271,15 +2271,15 @@ jvmti2EventIndex(jvmtiEvent kind)
             return EI_VM_INIT;
         case JVMTI_EVENT_VM_DEATH:
             return EI_VM_DEATH;
-        /* fiber events */
-        case JVMTI_EVENT_FIBER_SCHEDULED:
-            return EI_FIBER_SCHEDULED;
-        case JVMTI_EVENT_FIBER_TERMINATED:
-            return EI_FIBER_TERMINATED;
-        case JVMTI_EVENT_FIBER_MOUNT:
-            return EI_FIBER_MOUNT;
-        case JVMTI_EVENT_FIBER_UNMOUNT:
-            return EI_FIBER_UNMOUNT;
+        /* vthread events */
+        case JVMTI_EVENT_VIRTUAL_THREAD_SCHEDULED:
+            return EI_VIRTUAL_THREAD_SCHEDULED;
+        case JVMTI_EVENT_VIRTUAL_THREAD_TERMINATED:
+            return EI_VIRTUAL_THREAD_TERMINATED;
+        case JVMTI_EVENT_VIRTUAL_THREAD_MOUNTED:
+            return EI_VIRTUAL_THREAD_MOUNTED;
+        case JVMTI_EVENT_VIRTUAL_THREAD_UNMOUNTED:
+            return EI_VIRTUAL_THREAD_UNMOUNTED;
         /* continuation events */
         case JVMTI_EVENT_CONTINUATION_RUN:
             return EI_CONTINUATION_RUN;

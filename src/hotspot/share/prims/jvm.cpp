@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -92,6 +92,9 @@
 #include "utilities/utf8.hpp"
 #if INCLUDE_CDS
 #include "classfile/systemDictionaryShared.hpp"
+#endif
+#if INCLUDE_JFR
+#include "jfr/jfr.hpp"
 #endif
 
 #include <errno.h>
@@ -537,7 +540,7 @@ JVM_ENTRY(void, JVM_FillInStackTrace(JNIEnv *env, jobject receiver, jobject cont
   JVMWrapper("JVM_FillInStackTrace");
   Handle exception(thread, JNIHandles::resolve_non_null(receiver));
   Handle scope(thread, JNIHandles::resolve(contScope));
-  
+
   java_lang_Throwable::fill_in_stack_trace(exception, scope);
 JVM_END
 
@@ -621,7 +624,7 @@ JVM_END
 
 
 JVM_ENTRY(jint, JVM_MoreStackWalk(JNIEnv *env, jobject stackStream, jlong mode, jlong anchor,
-                                  jint frame_count, jint start_index, 
+                                  jint frame_count, jint start_index,
                                   jobjectArray frames))
   JVMWrapper("JVM_MoreStackWalk");
 
@@ -637,7 +640,7 @@ JVM_ENTRY(jint, JVM_MoreStackWalk(JNIEnv *env, jobject stackStream, jlong mode, 
   }
 
   Handle stackStream_h(THREAD, JNIHandles::resolve_non_null(stackStream));
-  return StackWalk::fetchNextBatch(stackStream_h, mode, anchor, frame_count, 
+  return StackWalk::fetchNextBatch(stackStream_h, mode, anchor, frame_count,
                                   start_index, frames_array_h, THREAD);
 JVM_END
 
@@ -2803,7 +2806,7 @@ void jio_print(const char* s, size_t len) {
   if (Arguments::vfprintf_hook() != NULL) {
     jio_fprintf(defaultStream::output_stream(), "%.*s", (int)len, s);
   } else {
-    // Make an unused local variable to avoid warning from gcc 4.x compiler.
+    // Make an unused local variable to avoid warning from gcc compiler.
     size_t count = ::write(defaultStream::output_fd(), s, (int)len);
   }
 }
@@ -2926,7 +2929,7 @@ JVM_ENTRY(void, JVM_StopThread(JNIEnv* env, jobject jthread, jobject throwable))
   bool is_alive = tlh.cv_internal_thread_to_JavaThread(jthread, &receiver, &java_thread);
   Events::log_exception(thread,
                         "JVM_StopThread thread JavaThread " INTPTR_FORMAT " as oop " INTPTR_FORMAT " [exception " INTPTR_FORMAT "]",
-                        p2i(receiver), p2i((address)java_thread), p2i(throwable));
+                        p2i(receiver), p2i(java_thread), p2i(throwable));
 
   if (is_alive) {
     // jthread refers to a live JavaThread.
@@ -3121,6 +3124,25 @@ JVM_ENTRY(void, JVM_Interrupt(JNIEnv* env, jobject jthread))
   }
 JVM_END
 
+JVM_ENTRY(jobject, JVM_ScopedCache(JNIEnv* env, jclass threadClass))
+  JVMWrapper("JVM_ScopedCache");
+  oop theCache = thread->_scopedCache;
+  if (theCache) {
+    arrayOop objs = arrayOop(theCache);
+    assert(objs->length() == ScopedCacheSize * 2, "wrong length");
+  }
+  return JNIHandles::make_local(env, theCache);
+JVM_END
+
+JVM_ENTRY(void, JVM_SetScopedCache(JNIEnv* env, jclass threadClass,
+                                   jobject theCache))
+  JVMWrapper("JVM_SetScopedCache");
+  arrayOop objs = arrayOop(JNIHandles::resolve(theCache));
+  if (objs != NULL) {
+    assert(objs->length() == ScopedCacheSize * 2, "wrong length");
+  }
+  thread->_scopedCache = objs;
+JVM_END
 
 // Return true iff the current thread has locked the object passed in
 
@@ -3700,28 +3722,30 @@ JVM_END
 
 JVM_ENTRY(void, JVM_VirtualThreadStarted(JNIEnv* env, jclass vthread_class, jthread event_thread, jobject vthread))
   JVMWrapper("JVM_VirtualThreadStarted");
-  if (JvmtiExport::should_post_fiber_scheduled()) {
-    JvmtiExport::post_fiber_scheduled(event_thread, vthread);
+  if (JvmtiExport::should_post_vthread_scheduled()) {
+    JvmtiExport::post_vthread_scheduled(event_thread, vthread);
   }
+  JFR_ONLY(Jfr::on_thread_start(event_thread, vthread));
 JVM_END
 
 JVM_ENTRY(void, JVM_VirtualThreadTerminated(JNIEnv* env, jclass vthread_class, jthread event_thread, jobject vthread))
   JVMWrapper("JVM_VirtualThreadTerminated");
-  if (JvmtiExport::should_post_fiber_terminated()) {
-    JvmtiExport::post_fiber_terminated(event_thread, vthread);
+  if (JvmtiExport::should_post_vthread_terminated()) {
+    JvmtiExport::post_vthread_terminated(event_thread, vthread);
   }
+  JFR_ONLY(Jfr::on_thread_exit(event_thread, vthread));
 JVM_END
 
 JVM_ENTRY(void, JVM_VirtualThreadMount(JNIEnv* env, jclass vthread_class, jthread event_thread, jobject vthread))
   JVMWrapper("JVM_VirtualThreadMount");
-  if (JvmtiExport::should_post_fiber_mount()) {
-    JvmtiExport::post_fiber_mount(event_thread, vthread);
+  if (JvmtiExport::should_post_vthread_mounted()) {
+    JvmtiExport::post_vthread_mounted(event_thread, vthread);
   }
 JVM_END
 
 JVM_ENTRY(void, JVM_VirtualThreadUnmount(JNIEnv* env, jclass vthread_class, jthread event_thread, jobject vthread))
   JVMWrapper("JVM_VirtualThreadUnmount");
-  if (JvmtiExport::should_post_fiber_unmount()) {
-    JvmtiExport::post_fiber_unmount(event_thread, vthread);
+  if (JvmtiExport::should_post_vthread_unmounted()) {
+    JvmtiExport::post_vthread_unmounted(event_thread, vthread);
   }
 JVM_END

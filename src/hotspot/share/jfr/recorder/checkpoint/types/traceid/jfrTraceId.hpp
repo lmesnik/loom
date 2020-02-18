@@ -84,6 +84,7 @@ class JfrTraceId : public AllStatic {
   static void assign(const PackageEntry* package);
   static void assign(const ClassLoaderData* cld);
   static traceid assign_thread_id();
+  static traceid assign_thread_id_range();
 
   static traceid get(const Klass* klass);
   static traceid get(jclass jc);
@@ -99,7 +100,7 @@ class JfrTraceId : public AllStatic {
   static traceid use(const ClassLoaderData* cld);
 
   // leak profiler
-  static void set_leakp(const Method* method);
+  static void set_leakp(const Klass* klass, const Method* method);
 
   static void remove(const Klass* klass);
   static void restore(const Klass* klass);

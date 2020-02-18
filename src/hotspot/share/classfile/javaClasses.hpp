@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -576,6 +576,9 @@ class java_lang_ThreadGroup : AllStatic {
 
 // Interface to java.lang.VirtualThread objects
 
+#define VTHREAD_INJECTED_FIELDS(macro)                            \
+  macro(java_lang_VirtualThread, jfrTraceId,  long_signature, false)
+
 class java_lang_VirtualThread : AllStatic {
  private:
   static int static_notify_jvmti_events_offset;
@@ -583,6 +586,9 @@ class java_lang_VirtualThread : AllStatic {
   static int _continuation_offset;
   static int _state_offset;
   // keep in sync with java.lang.VirtualThread
+  static int _jfrTraceId_offset;
+
+ public:
   enum {
     NEW          = 0,
     STARTED      = 1,
@@ -594,7 +600,6 @@ class java_lang_VirtualThread : AllStatic {
     WALKINGSTACK = 51,
     TERMINATED   = 99,
   };
- public:
   static void compute_offsets();
   static void serialize_offsets(SerializeClosure* f) NOT_CDS_RETURN;
 
@@ -610,6 +615,8 @@ class java_lang_VirtualThread : AllStatic {
   static java_lang_Thread::ThreadStatus map_state_to_thread_status(jshort state);
   static void set_notify_jvmti_events(jboolean enable);
   static void init_static_notify_jvmti_events();
+  static jlong jfrTraceId(oop vthread);
+  static jlong set_jfrTraceId(oop vthread, jlong id);
 };
 
 
@@ -1076,7 +1083,7 @@ class java_lang_ContinuationScope: AllStatic {
 
   static inline oop name(oop ref);
 };
-  
+
 // Interface to java.lang.Continuation objects
 class java_lang_Continuation: AllStatic {
   friend class JavaClasses;
@@ -1937,7 +1944,8 @@ class InjectedField {
   MEMBERNAME_INJECTED_FIELDS(macro)         \
   CALLSITECONTEXT_INJECTED_FIELDS(macro)    \
   STACKFRAMEINFO_INJECTED_FIELDS(macro)     \
-  MODULE_INJECTED_FIELDS(macro)
+  MODULE_INJECTED_FIELDS(macro)             \
+  VTHREAD_INJECTED_FIELDS(macro)
 
 // Interface to hard-coded offset checking
 

@@ -899,13 +899,19 @@ void LIRGenerator::arraycopy_helper(Intrinsic* x, int* flagsp, ciArrayKlass** ex
 LIR_Opr LIRGenerator::round_item(LIR_Opr opr) {
   assert(opr->is_register(), "why spill if item is not register?");
 
-  if (RoundFPResults && UseSSE < 1 && opr->is_single_fpu()) {
-    LIR_Opr result = new_register(T_FLOAT);
-    set_vreg_flag(result, must_start_in_memory);
-    assert(opr->is_register(), "only a register can be spilled");
-    assert(opr->value_type()->is_float(), "rounding only for floats available");
-    __ roundfp(opr, LIR_OprFact::illegalOpr, result);
-    return result;
+  if (strict_fp_requires_explicit_rounding) {
+#ifdef IA32
+    if (UseSSE < 1 && opr->is_single_fpu()) {
+      LIR_Opr result = new_register(T_FLOAT);
+      set_vreg_flag(result, must_start_in_memory);
+      assert(opr->is_register(), "only a register can be spilled");
+      assert(opr->value_type()->is_float(), "rounding only for floats available");
+      __ roundfp(opr, LIR_OprFact::illegalOpr, result);
+      return result;
+    }
+#else
+    Unimplemented();
+#endif // IA32
   }
   return opr;
 }
@@ -1311,6 +1317,13 @@ void LIRGenerator::do_currentThread(Intrinsic* x) {
   assert(x->number_of_arguments() == 0, "wrong type");
   LIR_Opr reg = rlock_result(x);
   __ move_wide(new LIR_Address(getThreadPointer(), in_bytes(JavaThread::threadObj_offset()), T_OBJECT), reg);
+}
+
+
+void LIRGenerator::do_scopedCache(Intrinsic* x) {
+  assert(x->number_of_arguments() == 0, "wrong type");
+  LIR_Opr reg = rlock_result(x);
+  __ move_wide(new LIR_Address(getThreadPointer(), in_bytes(JavaThread::scopedCache_offset()), T_OBJECT), reg);
 }
 
 
@@ -1951,6 +1964,8 @@ void LIRGenerator::do_Throw(Throw* x) {
 
 
 void LIRGenerator::do_RoundFP(RoundFP* x) {
+  assert(strict_fp_requires_explicit_rounding, "not required");
+
   LIRItem input(x->input(), this);
   input.load_item();
   LIR_Opr input_opr = input.result();
@@ -2964,6 +2979,7 @@ void LIRGenerator::do_ClassIDIntrinsic(Intrinsic* x) {
   __ move(id, rlock_result(x));
 }
 
+/*
 void LIRGenerator::do_getEventWriter(Intrinsic* x) {
   LabelObj* L_end = new LabelObj();
 
@@ -2981,6 +2997,7 @@ void LIRGenerator::do_getEventWriter(Intrinsic* x) {
 
   __ branch_destination(L_end->label());
 }
+*/
 
 #endif
 
@@ -3013,9 +3030,11 @@ void LIRGenerator::do_Intrinsic(Intrinsic* x) {
   case vmIntrinsics::_getClassId:
     do_ClassIDIntrinsic(x);
     break;
+  /*
   case vmIntrinsics::_getEventWriter:
     do_getEventWriter(x);
     break;
+  */
   case vmIntrinsics::_counterTime:
     do_RuntimeCall(CAST_FROM_FN_PTR(address, JFR_TIME_FUNCTION), x);
     break;
@@ -3034,6 +3053,7 @@ void LIRGenerator::do_Intrinsic(Intrinsic* x) {
   case vmIntrinsics::_isPrimitive:    do_isPrimitive(x);   break;
   case vmIntrinsics::_getClass:       do_getClass(x);      break;
   case vmIntrinsics::_currentThread:  do_currentThread(x); break;
+  case vmIntrinsics::_scopedCache:     do_scopedCache(x);    break;
 
   case vmIntrinsics::_dlog:           // fall through
   case vmIntrinsics::_dlog10:         // fall through

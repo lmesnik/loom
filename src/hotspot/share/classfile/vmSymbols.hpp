@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -403,6 +403,7 @@
   template(done_name,                                 "done")                                     \
   template(mounted_name,                              "mounted")                                  \
   template(numInterpretedFrames_name,                 "numInterpretedFrames")                     \
+  template(jfrTraceId_name,                           "jfrTraceId")                               \
   template(fp_name,                                   "fp")                                       \
   template(sp_name,                                   "sp")                                       \
   template(pc_name,                                   "pc")                                       \
@@ -499,6 +500,7 @@
   template(big_endian_name,                           "BIG_ENDIAN")                               \
   template(use_unaligned_access_name,                 "UNALIGNED_ACCESS")                         \
   template(data_cache_line_flush_size_name,           "DATA_CACHE_LINE_FLUSH_SIZE")               \
+  template(scoped_cache_shift_name,                   "SCOPED_CACHE_SHIFT")                       \
                                                                                                   \
   /* name symbols needed by intrinsics */                                                         \
   VM_INTRINSICS_DO(VM_INTRINSIC_IGNORE, VM_SYMBOL_IGNORE, template, VM_SYMBOL_IGNORE, VM_ALIAS_IGNORE) \
@@ -914,8 +916,14 @@
    do_name(     arraycopy_name,                                  "arraycopy")                                           \
    do_signature(arraycopy_signature,                             "(Ljava/lang/Object;ILjava/lang/Object;II)V")          \
   do_intrinsic(_currentThread,            java_lang_Thread,       currentThread_name, currentThread_signature,   F_S)   \
+  do_intrinsic(_scopedCache,              java_lang_Thread,       scopedCache_name, scopedCache_signature,   F_S)       \
+  do_intrinsic(_setScopedCache,           java_lang_Thread,       setScopedCache_name, setScopedCache_signature,   F_S) \
    do_name(     currentThread_name,                              "currentThread0")                                      \
+   do_name(     scopedCache_name,                                 "scopedCache")                                          \
+   do_name(     setScopedCache_name,                             "setScopedCache")                                          \
    do_signature(currentThread_signature,                         "()Ljava/lang/Thread;")                                \
+   do_signature(scopedCache_signature,                            "()[Ljava/lang/Object;")                               \
+   do_signature(setScopedCache_signature,                            "([Ljava/lang/Object;)V")                               \
                                                                                                                         \
   /* reflective intrinsics, for java/lang/Class, etc. */                                                                \
   do_intrinsic(_isAssignableFrom,         java_lang_Class,        isAssignableFrom_name, class_boolean_signature, F_RN) \
@@ -1631,8 +1639,6 @@ class vmSymbols: AllStatic {
     assert(_type_signatures[t] != NULL, "domain check");
     return _type_signatures[t];
   }
-  // inverse of type_signature; returns T_OBJECT if s is not recognized
-  static BasicType signature_type(const Symbol* s);
 
   static Symbol* symbol_at(SID id) {
     assert(id >= FIRST_SID && id < SID_LIMIT, "oob");
