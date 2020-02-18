@@ -654,16 +654,19 @@ public final class ProcessTools {
         //        System.out.println("PT: Running test with wrapper: " + wrapper);
 
         if (wrapper.equals("Fiber")) {
-            Fiber fiber = FiberScope.background().schedule(() -> {
-                    //                    System.out.println("Running test in fiber: " + className);
-                    //new Exception().printStackTrace(System.out);
-                mainMethod.invoke(null, new Object[] { classArgs });
-                return null;
+            MainThreadGroup tg = new MainThreadGroup();
+            Thread fiber = new Thread(tg, () -> {
+                    try {
+                    //    System.out.println("Running test in thread: " + className);
+                    //new Exception().printstreamStackTrace(System.out);
+
+                        mainMethod.invoke(null, new Object[] { classArgs });
+                    } catch (Throwable error) {
+                        tg.uncaughtThrowable = error;
+                    }
             });
-            Object result = fiber.join();
-            if (result != null && result instanceof Throwable) {
-                throw new RuntimeException((Throwable) result);
-            }
+            fiber.start();
+            fiber.join();
         } else if (wrapper.equals("Thread")) {
             MainThreadGroup tg = new MainThreadGroup();
             Thread t = new Thread(tg, () -> {
