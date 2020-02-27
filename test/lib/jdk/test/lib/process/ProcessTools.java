@@ -698,9 +698,9 @@ public final class ProcessTools {
         Method mainMethod = c.getMethod("main", new Class[] { String[].class });
         //        System.out.println("PT: Running test with wrapper: " + wrapper);
 
-        if (wrapper.equals("Fiber")) {
+        if (wrapper.equals("Virtual")) {
             MainThreadGroup tg = new MainThreadGroup();
-            Thread fiber = new Thread(tg, () -> {
+            Thread fiber = Thread.builder().virtual().task(() -> {
                     try {
                     //    System.out.println("Running test in thread: " + className);
                     //new Exception().printstreamStackTrace(System.out);
@@ -709,10 +709,10 @@ public final class ProcessTools {
                     } catch (Throwable error) {
                         tg.uncaughtThrowable = error;
                     }
-            });
+                }).build();
             fiber.start();
             fiber.join();
-        } else if (wrapper.equals("Thread")) {
+        } else if (wrapper.equals("Kernel")) {
             MainThreadGroup tg = new MainThreadGroup();
             Thread t = new Thread(tg, () -> {
                     try {
