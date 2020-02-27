@@ -702,8 +702,8 @@ public class Binder extends DebugeeBinder {
                 ArgumentHandler.joinArguments(argumentHandler.getRawArguments(), quote);
 
         if(System.getProperty("main.wrapper") != null) {
-            var fb = new nsk.share.FiberWrapper();
-            cmdline = "nsk.share.FiberWrapper " + classToExecute + " " +
+            //            var t = new nsk.share.MainWrapper();
+            cmdline = nsk.share.MainWrapper.class.getName() + " " + classToExecute + " " +
                 ArgumentHandler.joinArguments(argumentHandler.getRawArguments(), quote);
         }
 

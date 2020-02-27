@@ -27,6 +27,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PrintStream;
+import java.lang.reflect.InvocationTargetException;
 import java.nio.charset.Charset;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -47,9 +48,9 @@ import java.security.PrivilegedExceptionAction;
 
 
 
-public final class FiberWrapper {
+public final class MainWrapper {
 
-    public FiberWrapper() {
+    public MainWrapper() {
     }
 
     public static void main(String[] args) throws Exception {
@@ -61,13 +62,19 @@ public final class FiberWrapper {
 
 
         //mainMethod.invoke(null, new Object[] { classArgs });
-        Fiber fiber = FiberScope.background().schedule(() -> {
-                //System.out.println("Running test in fiber: " + className);
-                //                new Exception().printStackTrace(System.out);
+        Thread t = Thread.builder().virtual().task(() -> {
+                System.out.println("Running test in vthread: " + className);
+                new Exception().printStackTrace(System.out);
+            try {
                 mainMethod.invoke(null, new Object[] { classArgs });
-                return null;
-            });
-        fiber.join();
+            } catch (IllegalAccessException e) {
+                e.printStackTrace();
+            } catch (InvocationTargetException e) {
+                e.printStackTrace();
+            }
+        }).build();
+        t.start();
+        t.join();
 
     }
 }
