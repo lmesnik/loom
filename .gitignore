@@ -1,7 +1,7 @@
 /build/
 /dist/
 /.idea/
-nbproject/private/
+**/nbproject/private/
 /webrev
 /.src-rev
 /.jib/
