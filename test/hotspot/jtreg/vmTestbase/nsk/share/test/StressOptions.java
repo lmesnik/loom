@@ -81,7 +81,11 @@ public class StressOptions {
     public StressOptions() {
         time = 30;
         iterationsFactor = 1;
-        threadsFactor = 1;
+        threadsFactor = 1   ;
+        // TBD check if it is useful
+        if("XXVirtual".equals(System.getProperty("main.wrapper"))) {
+            threadsFactor = 10_000;
+        }
         runsFactor = 1;
     }
 

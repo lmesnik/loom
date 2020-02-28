@@ -61,27 +61,33 @@ public class ThreadsRunner implements MultiRunner, LogAware, RunParamsAware {
         this.log = log;
     }
 
-    private class ManagedThread extends Thread {
+    private class ManagedThread implements Runnable {
 
         private Stresser stresser;
         private Throwable exception;
         private Runnable test;
         private boolean shouldWait;
+        private Thread thread;
 
         public ManagedThread(Runnable test) {
-            super(test.toString());
             this.test = test;
+
+
+            if("Virtual".equals(System.getProperty("main.wrapper"))) {
+                this.thread = Thread.builder().task(this).virtual().build();
+            } else {
+                this.thread = Thread.builder().task(this).build();
+            }
             this.shouldWait = true;
-            this.stresser = new Stresser(this.getName(), runParams.getStressOptions());
+            this.stresser = new Stresser(thread.getName(), runParams.getStressOptions());
         }
 
         public void run() {
             wicket.waitFor();
             try {
                 stresser.start(runParams.getIterations());
-                while (!this.isInterrupted() && stresser.iteration()) {
+                while (!this.thread.isInterrupted() && stresser.iteration()) {
                     test.run();
-                    Thread.yield();
                 }
                 waitForOtherThreads();
             } catch (OutOfMemoryError oom) {
@@ -121,7 +127,7 @@ public class ThreadsRunner implements MultiRunner, LogAware, RunParamsAware {
             stresser.forceFinish();
             if (runParams.isInterruptThreads()) {
                 log.debug("Interrupting: " + this);
-                this.interrupt();
+                this.thread.interrupt();
             }
         }
 
@@ -151,7 +157,7 @@ public class ThreadsRunner implements MultiRunner, LogAware, RunParamsAware {
     }
 
     public Thread getThread(int index) {
-        return threads.get(index);
+        return threads.get(index).thread;
     }
 
     private int getCount() {
@@ -179,7 +185,7 @@ public class ThreadsRunner implements MultiRunner, LogAware, RunParamsAware {
         create();
         prepare();
         for (int i = 0; i < threads.size(); ++i) {
-            Thread t = (Thread) threads.get(i);
+            Thread t = threads.get(i).thread;
             log.debug("Starting " + t);
             t.start();
         }
@@ -203,7 +209,7 @@ public class ThreadsRunner implements MultiRunner, LogAware, RunParamsAware {
      */
     public void join() throws InterruptedException {
         for (int i = 0; i < threads.size(); ++i) {
-            Thread t = (Thread) threads.get(i);
+            Thread t = threads.get(i).thread;
             //log.debug("Joining " + t);
             t.join();
         }
@@ -231,7 +237,7 @@ public class ThreadsRunner implements MultiRunner, LogAware, RunParamsAware {
     private ManagedThread findManagedThread(Thread t) {
         for (int i = 0; i < threads.size(); i++) {
             ManagedThread mt = threads.get(i);
-            if (mt == t) {
+            if (mt.thread == t) {
                 return mt;
             }
         }

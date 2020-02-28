@@ -23,7 +23,6 @@
 package vm.share.gc;
 
 import nsk.share.test.ExecutionController;
-import metaspace.stressHierarchy.common.exceptions.GotWrongOOMEException;
 import nsk.share.gc.gp.classload.GeneratedClassProducer;
 
 public class TriggerUnloadingByFillingMetaspace implements
@@ -50,7 +49,7 @@ public class TriggerUnloadingByFillingMetaspace implements
                 generatedClassProducer.get().create(-100500); //argument is not used.
             } catch (Throwable oome) {
                 if (!isInMetaspace(oome)) {
-                    throw new GotWrongOOMEException("Got OOME in heap while triggering OOME in metaspace. Test result can't be valid.");
+                    throw new OutOfMemoryError("Got OOME in heap while triggering OOME in metaspace. Test result can't be valid.");
                 }
                 gotOOME = true;
             }
