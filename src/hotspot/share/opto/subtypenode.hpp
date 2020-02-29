@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,29 +22,33 @@
  *
  */
 
-#ifndef SHARE_JFR_UTILITIES_JFRSPINLOCKHELPER_HPP
-#define SHARE_JFR_UTILITIES_JFRSPINLOCKHELPER_HPP
+#ifndef SHARE_OPTO_SUBTYPENODE_HPP
+#define SHARE_OPTO_SUBTYPENODE_HPP
 
-#include "runtime/thread.hpp"
+#include "opto/node.hpp"
 
-// this utility could be useful for non cx8 platforms
+class SubTypeCheckNode : public CmpNode {
+public:
+  enum {
+    Control,
+    ObjOrSubKlass,
+    SuperKlass
+  };
 
-class JfrSpinlockHelper {
- private:
-  volatile int* const _lock;
-
- public:
-  JfrSpinlockHelper(volatile int* lock) : _lock(lock) {
-    Thread::SpinAcquire(_lock, NULL);
+  SubTypeCheckNode(Compile* C, Node* obj_or_subklass, Node* superklass)
+    : CmpNode(obj_or_subklass, superklass) {
+    init_class_id(Class_SubTypeCheck);
+    init_flags(Flag_is_macro);
+    C->add_macro_node(this);
   }
 
-  JfrSpinlockHelper(volatile int* const lock, const char* name) : _lock(lock) {
-    Thread::SpinAcquire(_lock, name);
-  }
+  Node* Ideal(PhaseGVN *phase, bool can_reshape);
+  virtual const Type* sub(const Type*, const Type*) const;
+  Node* Identity(PhaseGVN* phase) { return this; }
 
-  ~JfrSpinlockHelper() {
-    Thread::SpinRelease(_lock);
-  }
+  virtual int Opcode() const;
+  const Type* bottom_type() const { return TypeInt::CC; }
+  bool depends_only_on_test() const { return false; };
 };
 
-#endif // SHARE_JFR_UTILITIES_JFRSPINLOCKHELPER_HPP
+#endif // SHARE_OPTO_SUBTYPENODE_HPP

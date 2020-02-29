@@ -566,7 +566,6 @@ private:
   template <typename ConfigT> bool allocate_stacks_in_native(int size, int oops, bool needs_stack, bool needs_refstack);
   void allocate_stacks_in_java(int size, int oops, int frames);
   static int fix_decreasing_index(int index, int old_length, int new_length);
-  inline void post_safepoint(Handle conth);
   inline void post_safepoint_minimal(Handle conth);
   int ensure_capacity(int old, int min);
   bool allocate_stack(int size);
@@ -582,6 +581,7 @@ private:
   oop raw_allocate(Klass* klass, size_t words, size_t elements, bool zero);
 
 public:
+  inline void post_safepoint(Handle conth);
   oop allocate_stack_chunk(int stack_size);
 
 public:
@@ -1245,7 +1245,7 @@ oop ContMirror::find_chunk(void* p) const {
 template<typename Event> void ContMirror::post_jfr_event(Event* e, JavaThread* jt) {
   if (e->should_commit()) {
     log_develop_trace(jvmcont)("JFR event: frames: %d iframes: %d size: %d refs: %d", _e_num_frames, _e_num_interpreted_frames, _e_size, _e_num_refs);
-    e->set_carrierThread(JFR_STATIC_THREAD_ID(jt));
+    e->set_carrierThread(JFR_VM_THREAD_ID(jt));
     e->set_contClass(_cont->klass());
     e->set_numFrames(_e_num_frames);
     e->set_numIFrames(_e_num_interpreted_frames);
@@ -3335,7 +3335,11 @@ static void invlidate_JVMTI_stack(JavaThread* thread) {
 static void post_JVMTI_yield(JavaThread* thread, ContMirror& cont, const FrameInfo* fi) {
   if (JvmtiExport::should_post_continuation_yield() || JvmtiExport::can_post_frame_pop()) {
     set_anchor<true>(thread, fi); // ensure frozen frames are invisible
+
+    // The call to JVMTI can safepoint, so we need to restore oops.
+    Handle conth(thread, cont.mirror());
     JvmtiExport::post_continuation_yield(JavaThread::current(), num_java_frames(cont));
+    cont.post_safepoint(conth);
   }
 
   invlidate_JVMTI_stack(thread);
@@ -3753,7 +3757,7 @@ public:
         hframe hf = _cont.last_frame<mode>();
         log_develop_trace(jvmcont)("top_hframe before (thaw):"); if (log_develop_is_enabled(Trace, jvmcont)) hf.print_on(_cont, tty);
         frame caller;
-        
+
         int num_frames = FULL_STACK ? 1000 // TODO
                                     : (return_barrier ? 1 : 2);
         thaw<top>(hf, caller, num_frames);
@@ -3863,7 +3867,7 @@ public:
     if (is_last_in_chunks && _cont.is_flag(FLAG_LAST_FRAME_INTERPRETED)) {
       _cont.sub_size(SP_WIGGLE << LogBytesPerWord);
     }
-    
+
     log_develop_trace(jvmcont)("thaw_chunk partial: %d full: %d top: %d bottom: %d is_last: %d empty: %d size: %d argsize: %d", partial, FULL_STACK, top, bottom, is_last, empty, size, argsize);
 
     // if we're not in a full thaw, we're both top and bottom
@@ -3904,7 +3908,7 @@ public:
     }
 
     assert (is_last == _cont.is_empty(), "is_last: %d _cont.is_empty(): %d", is_last, _cont.is_empty());
-    
+
     if (LIKELY(!FULL_STACK || top)) {
       setup_chunk_jump(vsp, hsp);
     }
@@ -4251,6 +4255,7 @@ public:
 
   template<bool top>
   void recurse_compiled_frame(const hframe& hf, frame& caller, int num_frames) {
+    assert (!hf.is_interpreted_frame(), "");
     ThawFnT thaw_stub = get_oopmap_stub(hf); // try to do this early, so we wouldn't need to look at the oopMap again.
 
     return recurse_thaw_java_frame<Compiled, top>(hf, caller, num_frames, (void*)thaw_stub);
@@ -4461,12 +4466,17 @@ static int maybe_count_Java_frames(ContMirror& cont, bool return_barrier) {
   return -1;
 }
 
-static void post_JVMTI_continue(JavaThread* thread, FrameInfo* fi, int java_frame_count, bool return_barrier) {
+static void post_JVMTI_continue(JavaThread* thread, ContMirror& cont, FrameInfo* fi, int java_frame_count, bool return_barrier) {
   if (return_barrier) return;
 
   if (JvmtiExport::should_post_continuation_run()) {
     set_anchor<false>(thread, fi); // ensure thawed frames are visible
+
+    // The call to JVMTI can safepoint, so we need to restore oops.
+    Handle conth(thread, cont.mirror());
     JvmtiExport::post_continuation_run(JavaThread::current(), java_frame_count);
+    cont.post_safepoint(conth);
+
     clear_anchor(thread);
   }
 
@@ -4482,6 +4492,7 @@ static inline bool can_thaw_fast(ContMirror& cont) {
       if (!ContMirror::is_empty_chunk(chunk))
         return true;
     }
+    // return !cont.is_flag(FLAG_LAST_FRAME_INTERPRETED);
   }
 
   return java_lang_Continuation::numInterpretedFrames(cont.mirror()) == 0;
@@ -4526,13 +4537,13 @@ static inline void thaw0(JavaThread* thread, FrameInfo* fi, const bool return_ba
   if (UNLIKELY(cont.is_flag(FLAG_SAFEPOINT_YIELD))) {
     int java_frame_count = maybe_count_Java_frames(cont, return_barrier);
     res = cont_thaw<mode_slow>(thread, cont, fi, return_barrier);
-    post_JVMTI_continue(thread, fi, java_frame_count, return_barrier);
+    post_JVMTI_continue(thread, cont, fi, java_frame_count, return_barrier);
   } else if (LIKELY(can_thaw_fast(cont))) {
     res = cont_thaw<mode_fast>(thread, cont, fi, return_barrier);
   } else {
     int java_frame_count = maybe_count_Java_frames(cont, return_barrier);
     res = cont_thaw<mode_slow>(thread, cont, fi, return_barrier);
-    post_JVMTI_continue(thread, fi, java_frame_count, return_barrier);
+    post_JVMTI_continue(thread, cont, fi, java_frame_count, return_barrier);
   }
 
   thread->set_cont_fastpath(res);
@@ -4696,6 +4707,7 @@ address* Continuation::get_continuation_entry_pc_for_sender(Thread* thread, cons
 bool Continuation::fix_continuation_bottom_sender(JavaThread* thread, const frame& callee, address* sender_pc, intptr_t** sender_sp) {
   // TODO : this code and its use sites, as well as get_continuation_entry_pc_for_sender, probably need more work
   if (thread != NULL && is_return_barrier_entry(*sender_pc)) {
+    log_develop_debug(jvmcont)("fix_continuation_bottom_sender: [%ld] [%ld]", java_tid(thread), (long) thread->osthread()->thread_id());
     log_develop_trace(jvmcont)("fix_continuation_bottom_sender callee:"); if (log_develop_is_enabled(Debug, jvmcont)) callee.print_value_on(tty, thread);
     log_develop_trace(jvmcont)("fix_continuation_bottom_sender: sender_pc: " INTPTR_FORMAT " sender_sp: " INTPTR_FORMAT, p2i(*sender_pc), p2i(*sender_sp));
 

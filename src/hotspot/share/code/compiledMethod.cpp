@@ -360,6 +360,11 @@ int CompiledMethod::verify_icholder_relocations() {
 // called with a frame corresponding to a Java invoke
 void CompiledMethod::preserve_callee_argument_oops(frame fr, const RegisterMap *reg_map, OopClosure* f) {
   if (method() != NULL && !method()->is_native()) {
+    // handle the case of an anchor explicitly set in continuation code that doesn't have a callee
+    JavaThread* thread = reg_map->thread();
+    if (thread->has_last_Java_frame() && fr.sp() == thread->last_Java_sp())
+      return;
+
     address pc = fr.pc();
     SimpleScopeDesc ssd(this, pc);
     Bytecode_invoke call(methodHandle(Thread::current(), ssd.method()), ssd.bci());
