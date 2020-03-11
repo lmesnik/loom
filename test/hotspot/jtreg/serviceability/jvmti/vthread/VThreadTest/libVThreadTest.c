@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -56,8 +56,8 @@ unlock_events() {
 
 static void
 fatal(JNIEnv* jni, char* msg) {
-  fflush(0);
   (*jni)->FatalError(jni, msg);
+  fflush(stdout);
 }
 
 static Tinfo*
@@ -568,7 +568,6 @@ test_GetLocal(jvmtiEnv *jvmti, JNIEnv *jni, jthread vthread, char* event_name, i
   err = (*jvmti)->GetLocalObject(jvmti, vthread, frame_count, SlotObj, &obj);
   if (err != JVMTI_ERROR_NO_MORE_FRAMES) {
     printf("JVMTI GetLocalObject with big frame depth returned error: %d\n", err);
-    fflush(0);
     fatal(jni, "JVMTI GetLocalObject with big frame depth failed to return JVMTI_ERROR_NO_MORE_FRAMES");
   }
 
