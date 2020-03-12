@@ -1,5 +1,21 @@
+# Failed in vthread branch even wihtout wrapper
+runtime/condy/escapeAnalysis/TestEscapeCondy.java 9999999 generic-all
+compiler/c2/Test6857159.java 9999999 generic-all
+
+
+
+#####
+# Vthread regression tests
+
+runtime/vthreads/TestNoAllocationsInHRegions.java
+runtime/vthreads/MaterializeVirtualObjectTest.java
+
+#####
+# Known issues with reproducers
+compiler/jvmci/compilerToVM/MaterializeVirtualObjectTest.java
+
 ##########
-## Tests failing when main() is executed in additional fiber or in fiber instead of thread
+## Tests failing when main() is executed in additional vthread or in vthread instead of thread
 
 # OOME in unexpected thread
 gc/g1/ihop/TestIHOPStatic.java
@@ -17,7 +33,7 @@ runtime/Throwable/StackTraceLogging.java
 runtime/Throwable/TestMaxJavaStackTraceDepth.java
 
 ####
-## TODO check what is the cds issues with fiber
+## TODO check what is the cds issues with vthread
 runtime/cds/serviceability/ReplaceCriticalClasses.java
 runtime/cds/serviceability/ReplaceCriticalClassesForSubgraphs.java
 runtime/cds/TestInterpreterMethodEntries.java#id0
@@ -30,7 +46,7 @@ runtime/Dictionary/ProtectionDomainCacheTest.java
 
 
 ##########################################
-## Tests are executed when ProcessTools execute main() in separated fiber
+## Tests are executed when ProcessTools execute main() in separated vthread
 
 # Fail intermitently?
 runtime/8176717/TestInheritFD.java 99999998 generic-all
@@ -111,7 +127,7 @@ runtime/modules/PatchModule/PatchModuleClassList.java 99999998 generic-all
 
 
 
-#### Temporary excluded, failed with fiber but because of JDI wrapper
+#### Temporary excluded, failed with vthread but because of JDI wrapper
 vmTestbase/nsk/jdi/ClassPrepareEvent/referenceType/refType001/TestDescription.java 99999998 generic-all
 vmTestbase/nsk/jdi/ClassPrepareEvent/thread/thread001/TestDescription.java 99999998 generic-all
 vmTestbase/nsk/jdi/ClassUnloadEvent/className/classname001/TestDescription.java 99999998 generic-all

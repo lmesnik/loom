@@ -700,7 +700,7 @@ public final class ProcessTools {
 
         if (wrapper.equals("Virtual")) {
             MainThreadGroup tg = new MainThreadGroup();
-            Thread fiber = Thread.builder().virtual().task(() -> {
+            Thread vthread = Thread.builder().virtual().task(() -> {
                     try {
                     //    System.out.println("Running test in thread: " + className);
                     //new Exception().printstreamStackTrace(System.out);
@@ -710,8 +710,8 @@ public final class ProcessTools {
                         tg.uncaughtThrowable = error;
                     }
                 }).build();
-            fiber.start();
-            fiber.join();
+            vthread.start();
+            vthread.join();
         } else if (wrapper.equals("Kernel")) {
             MainThreadGroup tg = new MainThreadGroup();
             Thread t = new Thread(tg, () -> {

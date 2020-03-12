@@ -1,4 +1,11 @@
 #
+# Failed in vthread branch even without wrapper
+# TODO: Should be removed
+
+java/lang/StackWalker/StackWalkTest.java                9999999 generic-all
+java/lang/Continuation/PreemptLiveFramesDriver.java     9999999 generic-all
+java/lang/Continuation/Preempt.java                     9999999 generic-all
+
 
 
 
