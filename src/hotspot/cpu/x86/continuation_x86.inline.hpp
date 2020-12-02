@@ -778,6 +778,47 @@ static inline frame sender_for_compiled_frame(const frame& f) {
 static inline frame sender_for_interpreted_frame(const frame& f) {
   return frame(f.sender_sp(), f.interpreter_frame_sender_sp(), f.link(), f.sender_pc());
 }
+template <bool store>
+void ContinuationHelper::barriers_for_oops_in_chunk(oop chunk) {
+  CodeBlob* cb = NULL;
+  intptr_t* const start = jdk_internal_misc_StackChunk::start_address(chunk);
+  intptr_t* const end   = jdk_internal_misc_StackChunk::end_address(chunk);
+  for (intptr_t* sp = start + jdk_internal_misc_StackChunk::sp(chunk); sp < end; sp += cb->frame_size()) {
+    address pc = *(address*)(sp - 1);
+    int slot;
+    cb = ContinuationCodeBlobLookup::find_blob_and_oopmap(pc, slot);
+    const ImmutableOopMap* oopmap = cb->oop_map_for_slot(slot, pc);
+    assert (oopmap != NULL, "");
+    barriers_for_oops_in_frame<store>(sp, cb, oopmap);
+  }
+}
+
+template <bool store>
+void ContinuationHelper::barriers_for_oops_in_frame(intptr_t* sp, CodeBlob* cb, const ImmutableOopMap* oopmap) {
+  // we need to invoke the write barriers so as not to miss oops in old chunks that haven't yet been concurrently scanned
+
+  if (cb->is_nmethod()) {
+    cb->as_nmethod_or_null()->run_nmethod_entry_barrier();
+  }
+
+  for (OopMapStream oms(oopmap); !oms.is_done(); oms.next()) { // see void OopMapDo<OopFnT, DerivedOopFnT, ValueFilterT>::iterate_oops_do
+    OopMapValue omv = oms.current();
+    if (omv.type() != OopMapValue::oop_value && omv.type() != OopMapValue::narrowoop_value)
+      continue;
+    assert (UseCompressedOops || omv.type() == OopMapValue::oop_value, "");
+
+    void* p = reg_to_loc(omv.reg(), sp);
+    assert (p != NULL, "");
+    assert (is_in_frame(cb, sp, p), "");
+
+    const bool narrow = omv.type() == OopMapValue::narrowoop_value;
+    oop value = narrow ? (oop)HeapAccess<>::oop_load((narrowOop*)p) : HeapAccess<>::oop_load((oop*)p);
+    if (store) {
+      narrow ? HeapAccess<>::oop_store((narrowOop*)p, value) : HeapAccess<>::oop_store((oop*)p, value);
+    }
+    log_develop_trace(jvmcont)("barriers_for_oops_in_frame narrow: %d reg: %s p: " INTPTR_FORMAT " sp offset: %ld", narrow, omv.reg()->name(), p2i(p), (intptr_t*)p - sp);
+  }
+}
 
 // inline void Freeze<ConfigT, mode>::update_register_map_stub(RegisterMap* map, const frame& f) {
 //   update_register_map(map, link_address_stub(f));
@@ -1227,7 +1268,7 @@ static void fix_oops(const ImmutableOopMap* oopmap, intptr_t* sp, CodeBlob* cb) 
 }
 
 NOINLINE static void fix_stack_chunk(oop chunk) {
-  assert (ContMirror::is_stack_chunk(chunk), "");
+  assert (jdk_internal_misc_StackChunk::is_stack_chunk(chunk), "");
 
   log_develop_trace(jvmcont)("fix_stack_chunk young: %d", !requires_barriers(chunk));
   bool narrow = UseCompressedOops; // TODO PERF: templatize
@@ -1236,10 +1277,8 @@ NOINLINE static void fix_stack_chunk(oop chunk) {
   int num_oops = 0;
   CodeBlob* cb = NULL;
 
-  int argsize = jdk_internal_misc_StackChunk::argsize(chunk);
-  if (argsize > 0) argsize += frame_metadata;
-  intptr_t* start = (intptr_t*)InstanceStackChunkKlass::start_of_stack(chunk);
-  intptr_t* end = start + jdk_internal_misc_StackChunk::size(chunk) - argsize;
+  intptr_t* start = jdk_internal_misc_StackChunk::start_address(chunk);
+  intptr_t* end   = jdk_internal_misc_StackChunk::end_address(chunk);
   start += jdk_internal_misc_StackChunk::sp(chunk);
 
   for (intptr_t* sp = start; sp < end; sp += cb->frame_size()) {
@@ -1298,8 +1337,8 @@ NOINLINE static void fix_stack_chunk(oop chunk) {
 template <typename ConfigT, op_mode mode>
 void Thaw<ConfigT, mode>::deoptimize_frames_in_chunk(oop chunk) {
   CodeBlob* cb = NULL;
-  intptr_t* start = (intptr_t*)InstanceStackChunkKlass::start_of_stack(chunk);
-  intptr_t* end = start + jdk_internal_misc_StackChunk::end(chunk);
+  intptr_t* const start = jdk_internal_misc_StackChunk::start_address(chunk);
+  intptr_t* const end   = jdk_internal_misc_StackChunk::end_address(chunk);
   for (intptr_t* sp = start + jdk_internal_misc_StackChunk::sp(chunk); sp < end; sp += cb->frame_size()) {
     address pc = *(address*)(sp - 1);
     int slot;
@@ -1407,7 +1446,7 @@ bool Continuation::debug_verify_stack_chunk(oop chunk, oop cont, size_t* out_siz
   DEBUG_ONLY(if (!VerifyContinuations) return true;)
   assert (oopDesc::is_oop(chunk), "");
   log_develop_trace(jvmcont)("debug_verify_stack_chunk young: %d", !requires_barriers(chunk));
-  assert (ContMirror::is_stack_chunk(chunk), "");
+  assert (jdk_internal_misc_StackChunk::is_stack_chunk(chunk), "");
   assert (jdk_internal_misc_StackChunk::size(chunk) >= 0, "");
   assert (jdk_internal_misc_StackChunk::argsize(chunk) >= 0, "");
   if (!SafepointSynchronize::is_at_safepoint()) {
@@ -1435,11 +1474,8 @@ bool Continuation::debug_verify_stack_chunk(oop chunk, oop cont, size_t* out_siz
   int num_frames = 0;
   int num_oops = 0;
 
-  int argsize = jdk_internal_misc_StackChunk::argsize(chunk);
-  assert (argsize >= 0, "");
-  if (argsize > 0) argsize += frame_metadata;
-  intptr_t* const start = (intptr_t*)InstanceStackChunkKlass::start_of_stack(chunk);
-  intptr_t* const end = start + jdk_internal_misc_StackChunk::size(chunk) - argsize;
+  intptr_t* const start = jdk_internal_misc_StackChunk::start_address(chunk);
+  intptr_t* const end   = jdk_internal_misc_StackChunk::end_address(chunk);
   int size0 = 0;
   intptr_t* sp;
   CodeBlob* cb = NULL;

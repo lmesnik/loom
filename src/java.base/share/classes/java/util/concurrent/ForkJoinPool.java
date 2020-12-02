@@ -53,7 +53,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.Condition;
-import jdk.internal.misc.VirtualThreads;
 
 /**
  * An {@link ExecutorService} for running {@link ForkJoinTask}s.
@@ -1529,7 +1528,7 @@ public class ForkJoinPool extends AbstractExecutorService {
             stealCount += ns;                        // accumulate steals
             lock.unlock();
             long c = ctl;
-            if (w.phase != QUIET)                    // decrement counts
+            if ((cfg & QUIET) == 0) // unless self-signalled, decrement counts
                 do {} while (c != (c = compareAndExchangeCtl(
                                        c, ((RC_MASK & (c - RC_UNIT)) |
                                            (TC_MASK & (c - TC_UNIT)) |
@@ -1689,26 +1688,23 @@ public class ForkJoinPool extends AbstractExecutorService {
                 break;
             else if (mode < 0)
                 return -1;
-            else if ((int)(ctl >> RC_SHIFT) > ac)
+            else if ((c = ctl) == prevCtl)
                 Thread.onSpinWait();         // signal in progress
-            else if (deadline != 0L &&
-                     deadline - System.currentTimeMillis() <= TIMEOUT_SLOP) {
-                if (c != (c = ctl))          // ensure consistent
-                    ac = (int)(c >> RC_SHIFT);
-                else if (compareAndSetCtl(c, ((UC_MASK & (c - TC_UNIT)) |
-                                              (w.stackPred & SP_MASK)))) {
-                    w.phase = QUIET;
-                    return -1;               // drop on timeout
-                }
-            }
-            else if (!(alt = !alt))    // check between park calls
+            else if (!(alt = !alt))          // check between park calls
                 Thread.interrupted();
-            else if (deadline != 0L)
-                LockSupport.parkUntil(deadline);
-            else
+            else if (deadline == 0L)
                 LockSupport.park();
+            else if (deadline - System.currentTimeMillis() > TIMEOUT_SLOP)
+                LockSupport.parkUntil(deadline);
+            else if (((int)c & SMASK) == (w.config & SMASK) &&
+                     compareAndSetCtl(c, ((UC_MASK & (c - TC_UNIT)) |
+                                          (prevCtl & SP_MASK)))) {
+                w.config |= QUIET;           // sentinel for deregisterWorker
+                return -1;                   // drop on timeout
+            }
+            else if ((deadline += keepAlive) == 0L)
+                deadline = 1L;               // not at head; restart timer
         }
-        LockSupport.setCurrentBlocker(null);
         return 0;
     }
 
@@ -2176,7 +2172,8 @@ public class ForkJoinPool extends AbstractExecutorService {
         Thread t; ForkJoinWorkerThread wt; WorkQueue q;
         if (task == null)
             throw new NullPointerException();
-        if (((t = VirtualThreads.currentCarrierThread()) instanceof ForkJoinWorkerThread) &&
+        //if (((t = VirtualThreads.currentCarrierThread()) instanceof ForkJoinWorkerThread) &&
+        if (((t = Thread.currentThread()) instanceof ForkJoinWorkerThread) &&
             (q = (wt = (ForkJoinWorkerThread)t).workQueue) != null &&
             wt.pool == this)
             q.push(task, this);

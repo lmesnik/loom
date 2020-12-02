@@ -114,6 +114,9 @@ public class Thread implements Runnable {
 
     /* Reserved for exclusive use by the JVM, TBD: move to FieldHolder */
     private long eetop;
+ 
+    // used by JVMTI to store JvmtiThreadState link
+    private volatile long jvmtiThreadState;
 
     // holds fields for kernel threads
     private static class FieldHolder {
@@ -3296,14 +3299,14 @@ public class Thread implements Runnable {
             };
             ThreadGroup root = AccessController.doPrivileged(pa);
 
-            var vgroup = new ThreadGroup(root, "VirtualThreads", NORM_PRIORITY, false);
+            var vgroup = new ThreadGroup(root, "VirtualThreads", NORM_PRIORITY);
             THREAD_GROUP = vgroup;
 
             int priority = NORM_PRIORITY;
             if (System.getSecurityManager() != null) {
                 priority = MIN_PRIORITY;
             }
-            OFFSPRING_THREAD_GROUP = new ThreadGroup(vgroup, "offspring", priority, false);
+            OFFSPRING_THREAD_GROUP = new ThreadGroup(vgroup, "VirtualThreads-offspring", priority);
 
             ACCESS_CONTROL_CONTEXT = new AccessControlContext(new ProtectionDomain[] {
                 new ProtectionDomain(null, null)

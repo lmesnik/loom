@@ -179,6 +179,25 @@ static bool iterate_oops(OopClosureType* closure, const ImmutableOopMap* oopmap,
   return mutated;
 }
 
+inline static int get_chunk_sp(oop chunk) {
+  int chunk_sp = jdk_internal_misc_StackChunk::sp(chunk);
+
+  // we don't invoke write barriers on oops in thawed frames, so we use the gcSP field to traverse thawed frames
+  // if (chunk_sp != jdk_internal_misc_StackChunk::gc_sp(chunk) && Universe::heap()->requires_barriers(chunk)) {
+  //   uint64_t marking_cycle = CodeCache::marking_cycle() >> 1;
+  //   uint64_t chunk_marking_cycle = jdk_internal_misc_StackChunk::mark_cycle(chunk) >> 1;
+  //   if (marking_cycle == chunk_marking_cycle) {
+  //     // Marking isn't finished, so we need to traverse thawed frames
+  //     chunk_sp = jdk_internal_misc_StackChunk::gc_sp(chunk);
+  //     assert (chunk_sp >= 0 && chunk_sp <= jdk_internal_misc_StackChunk::sp(chunk), "");
+  //   } else {
+  //     jdk_internal_misc_StackChunk::set_gc_sp(chunk, chunk_sp); // atomic; benign race
+  //   }
+  // }
+
+  return chunk_sp;
+}
+
 template <class OopClosureType, bool concurrent_gc>
 void Continuation::stack_chunk_iterate_stack(oop chunk, OopClosureType* closure) {
   // see sender_for_compiled_frame
@@ -204,25 +223,28 @@ void Continuation::stack_chunk_iterate_stack(oop chunk, OopClosureType* closure)
     assert (!SafepointSynchronize::is_at_safepoint() || jdk_internal_misc_StackChunk::gc_mode(chunk), "gc_mode: %d is_at_safepoint: %d", jdk_internal_misc_StackChunk::gc_mode(chunk), SafepointSynchronize::is_at_safepoint());
   }
 
-  int argsize = jdk_internal_misc_StackChunk::argsize(chunk);
-  if (argsize > 0) argsize += frame_metadata;
-  intptr_t* const start = (intptr_t*)InstanceStackChunkKlass::start_of_stack(chunk);
-  intptr_t* const end = start + jdk_internal_misc_StackChunk::size(chunk) - argsize;
+  intptr_t* const start = jdk_internal_misc_StackChunk::start_address(chunk);
+  intptr_t* const end   = jdk_internal_misc_StackChunk::end_address(chunk);
   CodeBlob* cb = NULL;
-  for (intptr_t* sp = start + jdk_internal_misc_StackChunk::sp(chunk); sp < end; sp += cb->frame_size()) {
+  for (intptr_t* sp = start + get_chunk_sp(chunk); sp < end; sp += cb->frame_size()) {
     address pc = *(address*)(sp - 1);
     log_develop_trace(jvmcont)("stack_chunk_iterate_stack sp: %ld pc: " INTPTR_FORMAT, sp - start, p2i(pc));
     assert (pc != NULL, "");
+    // if (Continuation::is_return_barrier_entry(pc)) {
+    //   assert ((int)(sp - start) < jdk_internal_misc_StackChunk::sp(chunk), ""); // only happens when starting from gcSP
+    //   break;
+    // }
 
     int slot;
     cb = ContinuationCodeBlobLookup::find_blob_and_oopmap(pc, slot);
     assert (cb != NULL, "");
     assert (cb->is_compiled(), "");
     assert (cb->frame_size() > 0, "");
-    assert (!cb->as_compiled_method()->is_deopt_pc(pc), "");
 
+    assert (!cb->as_compiled_method()->is_deopt_pc(pc), "");
     assert (slot >= 0, "");
     const ImmutableOopMap* oopmap = cb->oop_map_for_slot(slot, pc);
+    // const ImmutableOopMap* oopmap;
     // if (LIKELY(slot >= 0)) {
     //   oopmap = cb->oop_map_for_slot(slot, pc);
     // } else {
@@ -232,6 +254,7 @@ void Continuation::stack_chunk_iterate_stack(oop chunk, OopClosureType* closure)
     //   oopmap = cb->oop_map_for_return_address(pc);
     // }
     assert (oopmap != NULL, "");
+
     log_develop_trace(jvmcont)("stack_chunk_iterate_stack slot: %d codeblob:", slot);
     if (log_develop_is_enabled(Trace, jvmcont)) cb->print_value_on(tty);
 
@@ -388,13 +411,11 @@ void Continuation::stack_chunk_iterate_stack_bounded(oop chunk, OopClosureType* 
   }
   assert (!SafepointSynchronize::is_at_safepoint() || jdk_internal_misc_StackChunk::gc_mode(chunk), "gc_mode: %d is_at_safepoint: %d", jdk_internal_misc_StackChunk::gc_mode(chunk), SafepointSynchronize::is_at_safepoint());
 
-  int argsize = jdk_internal_misc_StackChunk::argsize(chunk);
-  if (argsize > 0) argsize += frame_metadata;
-  intptr_t* const start = (intptr_t*)InstanceStackChunkKlass::start_of_stack(chunk);
-  intptr_t* end = start + jdk_internal_misc_StackChunk::size(chunk) - argsize;
+  intptr_t* const start = jdk_internal_misc_StackChunk::start_address(chunk);
+  intptr_t* end = jdk_internal_misc_StackChunk::end_address(chunk);
   if (end > h) end = h;
   CodeBlob* cb = NULL;
-  for (intptr_t* sp = start + jdk_internal_misc_StackChunk::sp(chunk); sp < end; sp += cb->frame_size()) {
+  for (intptr_t* sp = start + get_chunk_sp(chunk); sp < end; sp += cb->frame_size()) {
     intptr_t* next_sp = sp + cb->frame_size();
     if (sp + cb->frame_size() >= l) {
       sp += cb->frame_size();
