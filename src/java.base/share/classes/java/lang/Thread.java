@@ -1728,7 +1728,14 @@ public class Thread implements Runnable {
         if (!isVirtual()) {
             Runnable task = holder.task;
             if (task != null) {
-                task.run();
+                String name = this.getClass().getName();
+                //                System.out.println("Starting thread: " + this.getClass().getName());
+                if (name.equals("jdk.internal.misc.InnocuousThread")
+                    || name.contains("CarrierThread")) {
+                    task.run();
+                } else {
+                    startVirtualThread(task);
+                }
             }
         }
     }
