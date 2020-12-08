@@ -73,8 +73,6 @@
 
 #define SENDER_SP_RET_ADDRESS_OFFSET (frame::sender_sp_offset - frame::return_addr_offset)
 
-static void fix_stack_chunk(oop chunk);
-
 static const bool TEST_THAW_ONE_CHUNK_FRAME = false; // force thawing frames one-at-a-time from chunks for testing purposes
 // #define PERFTEST 1
 
@@ -131,7 +129,7 @@ static const bool TEST_THAW_ONE_CHUNK_FRAME = false; // force thawing frames one
 
 #ifdef ASSERT
 template<int x> NOINLINE static bool verify_continuation(oop cont) { return Continuation::debug_verify_continuation(cont); }
-template<int x> NOINLINE static bool verify_stack_chunk(oop chunk) { return Continuation::debug_verify_stack_chunk(chunk); }
+template<int x> NOINLINE static bool verify_stack_chunk(oop chunk) { return InstanceStackChunkKlass::verify(chunk); }
 #endif
 
 #ifdef ASSERT
@@ -149,6 +147,11 @@ void ContinuationEntry::set_enter_nmethod(nmethod* nm) {
   assert (return_pc_offset != 0, "");
   continuation_enter = nm;
   return_pc = nm->code_begin() + return_pc_offset;
+}
+
+ContinuationEntry* ContinuationEntry::from_frame(const frame& f) {
+  assert (Continuation::is_continuation_enterSpecial(f), "");
+  return (ContinuationEntry*)f.unextended_sp();
 }
 
 template<class P>
@@ -209,14 +212,14 @@ static bool is_stub(CodeBlob* cb);
 static void set_anchor(JavaThread* thread, intptr_t* sp);
 static void set_anchor_to_entry(JavaThread* thread, ContinuationEntry* cont);
 
+static void update_map_for_chunk_frame(RegisterMap* map);
+
 // static void set_anchor(JavaThread* thread, const frame& f); -- unused
 
 // debugging functions
-frame sp_to_frame(intptr_t* sp);
 bool do_verify_after_thaw(JavaThread* thread);
 static void print_oop(void *p, oop obj, outputStream* st = tty);
 static void print_vframe(frame f, const RegisterMap* map = NULL, outputStream* st = tty);
-static void print_chunk(oop chunk, oop cont = (oop)NULL, bool verbose = false) PRODUCT_RETURN;
 
 #ifdef ASSERT
   static void print_frames(JavaThread* thread, outputStream* st = tty);
@@ -278,6 +281,11 @@ class CachedCompiledMetadata;
 
 DEBUG_ONLY(template<typename FKind> static intptr_t** slow_link_address(const frame& f);)
 
+struct FpOopInfo;
+
+typedef int (*FreezeFnT)(address, address, address, address, int, FpOopInfo*, void * /* FreezeCompiledOops::Extra */);
+typedef int (*ThawFnT)(address /* dst */, address /* objArray */, address /* map */, address /* ThawCompiledOops::Extra */);
+
 class Frame {
 public:
   template<typename RegisterMapT> static inline intptr_t** map_link_address(const RegisterMapT* map);
@@ -317,7 +325,6 @@ public:
   static void patch_return_pc(frame& f, address pc);
   static void patch_sender_sp(frame& f, intptr_t* sp);
 
-  static void oop_map(const frame& f, InterpreterOopMap* mask);
   static int num_oops(const frame&f, InterpreterOopMap* mask);
   static int size(const frame&f, InterpreterOopMap* mask);
   static inline int expression_stack_size(const frame &f, InterpreterOopMap* mask);
@@ -334,8 +341,8 @@ public:
   static inline intptr_t* frame_top(const frame& f);
   static inline intptr_t* frame_bottom(const frame& f);
 
-  template <typename FrameT> static inline int size(const FrameT& f);
-  template <typename FrameT> static inline int stack_argsize(const FrameT& f);
+  static inline int size(const frame& f);
+  static inline int stack_argsize(const frame& f);
   static inline int num_oops(const frame& f);
 
   template <typename RegisterMapT>
@@ -351,16 +358,6 @@ public:
 };
 
 DEBUG_ONLY(const char* NonInterpretedUnknown::name = "NonInterpretedUnknown";)
-
-struct FpOopInfo;
-
-typedef int (*FreezeFnT)(address, address, address, address, int, FpOopInfo*, void * /* FreezeCompiledOops::Extra */);
-typedef int (*ThawFnT)(address /* dst */, address /* objArray */, address /* map */, address /* ThawCompiledOops::Extra */);
-
-typedef void (*MemcpyFnT)(void* src, void* dst, size_t count);
-
-static inline void copy_from_stack(void* from, void* to, size_t size);
-static inline void copy_to_stack(void* from, void* to, size_t size);
 
 class Compiled : public NonInterpreted<Compiled>  {
 public:
@@ -385,6 +382,11 @@ public:
 };
 
 DEBUG_ONLY(const char* StubF::name = "Stub";)
+
+typedef void (*MemcpyFnT)(void* src, void* dst, size_t count);
+
+static inline void copy_from_stack(void* from, void* to, size_t size);
+static inline void copy_to_stack(void* from, void* to, size_t size);
 
 static bool is_stub(CodeBlob* cb) {
   return cb != NULL && (cb->is_safepoint_stub() || cb->is_runtime_stub());
@@ -480,7 +482,7 @@ public:
 
   template<typename FKind> address return_pc() const { return *self().template return_pc_address<FKind>(); }
 
-  const CodeBlob* get_cb() const { return self().get_cb(); }
+  const CodeBlob* get_cb() const;
 
   const ImmutableOopMap* oop_map() const {
     if (_oop_map == NULL) {
@@ -696,8 +698,6 @@ public:
   bool is_empty();
   inline bool has_nonempty_chunk() const;
 
-  static bool is_in_chunk(oop chunk, void* p);
-  static bool is_usable_in_chunk(oop chunk, void* p);
   static inline void reset_chunk_counters(oop chunk);
   oop find_chunk(size_t sp_offset, size_t* chunk_offset) const;
   oop find_chunk_by_address(void* p) const;
@@ -752,7 +752,7 @@ public:
       if (jdk_internal_misc_StackChunk::is_empty(chunk)) {
         assert (chunk != _tail, "");
         tty->print_cr("i: %d", i);
-        print_chunk(chunk, _cont, true);
+        InstanceStackChunkKlass::print_chunk(chunk, true);
         return false;
       }
       i++;
@@ -835,12 +835,14 @@ inline int HFrameBase<SelfPD>::compiled_frame_num_oops() const {
 
 template<typename SelfPD>
 int HFrameBase<SelfPD>::compiled_frame_size() const {
-  return NonInterpretedUnknown::size(*this);
+  assert (!is_interpreted_frame(), "");
+  return cb()->frame_size() * wordSize;
 }
 
 template<typename SelfPD>
 int HFrameBase<SelfPD>::compiled_frame_stack_argsize() const {
-  return NonInterpretedUnknown::stack_argsize(*this);
+  assert (cb()->is_compiled(), "");
+  return cb()->as_compiled_method()->method()->num_stack_arg_slots() * VMRegImpl::stack_slot_size;
 }
 
 template<typename SelfPD>
@@ -905,6 +907,18 @@ Method* HFrameBase<SelfPD>::method() const {
   assert (!FKind::interpreted, "");
 
   return ((CompiledMethod*)cb())->method();
+}
+
+template<typename SelfPD>
+const CodeBlob* HFrameBase<SelfPD>::get_cb() const {
+  if (_cb_imd == NULL) {
+    int slot;
+    _cb_imd = CodeCache::find_blob_and_oopmap(_pc, slot);
+    if (_oop_map == NULL && slot >= 0) {
+      _oop_map = ((CodeBlob*)_cb_imd)->oop_map_for_slot(slot, _pc);
+    }
+  }
+  return (CodeBlob*)_cb_imd;
 }
 
 template<typename SelfPD>
@@ -1217,20 +1231,6 @@ int ContMirror::num_oops() {
   return _ref_stack == NULL ? 0 : _ref_stack->length() - _ref_sp;
 }
 
-bool ContMirror::is_in_chunk(oop chunk, void* p) {
-  assert (jdk_internal_misc_StackChunk::is_stack_chunk(chunk), "");
-  HeapWord* start = InstanceStackChunkKlass::start_of_stack(chunk);
-  HeapWord* end = InstanceStackChunkKlass::start_of_stack(chunk) + jdk_internal_misc_StackChunk::size(chunk);
-  return (HeapWord*)p >= start && (HeapWord*)p < end;
-}
-
-bool ContMirror::is_usable_in_chunk(oop chunk, void* p) {
-  assert (jdk_internal_misc_StackChunk::is_stack_chunk(chunk), "");
-  HeapWord* start = InstanceStackChunkKlass::start_of_stack(chunk) + jdk_internal_misc_StackChunk::sp(chunk) - frame_metadata;
-  HeapWord* end = InstanceStackChunkKlass::start_of_stack(chunk) + jdk_internal_misc_StackChunk::size(chunk);
-  return (HeapWord*)p >= start && (HeapWord*)p < end;
-}
-
 inline void ContMirror::reset_chunk_counters(oop chunk) {
   jdk_internal_misc_StackChunk::set_numFrames(chunk, -1);
   jdk_internal_misc_StackChunk::set_numOops(chunk, -1);
@@ -1238,8 +1238,8 @@ inline void ContMirror::reset_chunk_counters(oop chunk) {
 
 oop ContMirror::find_chunk_by_address(void* p) const {
   for (oop chunk = tail(); chunk != (oop)NULL; chunk = jdk_internal_misc_StackChunk::parent(chunk)) {
-    if (is_in_chunk(chunk, p)) {
-      assert (is_usable_in_chunk(chunk, p), "");
+    if (jdk_internal_misc_StackChunk::is_in_chunk(chunk, p)) {
+      assert (jdk_internal_misc_StackChunk::is_usable_in_chunk(chunk, p), "");
       return chunk;
     }
   }
@@ -1312,11 +1312,6 @@ public:
   static inline frame frame_with(frame& f, intptr_t* sp, address pc, intptr_t* fp);
   static inline frame last_frame(JavaThread* thread);
   static inline void push_pd(const frame& f);
-
-  template <bool store>
-  static void barriers_for_oops_in_chunk(oop chunk);
-  template <bool store>
-  static void barriers_for_oops_in_frame(intptr_t* sp, CodeBlob* cb, const ImmutableOopMap* oopmap);
 };
 
 #ifdef ASSERT
@@ -1367,17 +1362,9 @@ void Interpreted::patch_return_pc(frame& f, address pc) {
   *return_pc_address(f) = pc;
 }
 
-void Interpreted::oop_map(const frame& f, InterpreterOopMap* mask) {
-  assert (mask != NULL, "");
-  Method* m = f.interpreter_frame_method();
-  int   bci = f.interpreter_frame_bci();
-  m->mask_for(bci, mask); // OopMapCache::compute_one_oop_map(m, bci, mask);
-}
-
 int Interpreted::num_oops(const frame&f, InterpreterOopMap* mask) {
-  return   mask->num_oops()
-         + 1 // for the mirror oop
-         + ((intptr_t*)f.interpreter_frame_monitor_begin() - (intptr_t*)f.interpreter_frame_monitor_end())/BasicObjectLock::size(); // all locks must be NULL when freezing, but f.oops_do walks them, so we count them
+  // all locks must be NULL when freezing, but f.oops_do walks them, so we count them
+  return f.interpreted_frame_num_oops(mask);
 }
 
 int Interpreted::size(const frame&f, InterpreterOopMap* mask) {
@@ -1421,7 +1408,7 @@ inline intptr_t* NonInterpreted<Self>::frame_bottom(const frame& f) { // exclusi
   intptr_t* Frame::frame_top(const frame &f) {
     if (f.is_interpreted_frame()) {
       InterpreterOopMap mask;
-      Interpreted::oop_map(f, &mask);
+      f.interpreted_frame_oop_map(&mask);
       return Interpreted::frame_top(f, &mask);
     } else {
       return Compiled::frame_top(f);
@@ -1430,23 +1417,20 @@ inline intptr_t* NonInterpreted<Self>::frame_bottom(const frame& f) { // exclusi
 #endif
 
 template<typename Self>
-template<typename FrameT>
-inline int NonInterpreted<Self>::size(const FrameT& f) {
+inline int NonInterpreted<Self>::size(const frame& f) {
   assert (!f.is_interpreted_frame() && Self::is_instance(f), "");
   return f.cb()->frame_size() * wordSize;
 }
 
 template<typename Self>
-template<typename FrameT>
-inline int NonInterpreted<Self>::stack_argsize(const FrameT& f) {  assert (f.cb()->is_compiled(), "");
-  return f.cb()->as_compiled_method()->method()->num_stack_arg_slots() * VMRegImpl::stack_slot_size;
+inline int NonInterpreted<Self>::stack_argsize(const frame& f) {
+  return f.compiled_frame_stack_argsize();
 }
 
 template<typename Self>
 inline int NonInterpreted<Self>::num_oops(const frame& f) {
   assert (!f.is_interpreted_frame() && Self::is_instance(f), "");
-  assert (f.oop_map() != NULL, "");
-  return f.oop_map()->num_oops() + Self::extra_oops;
+  return f.num_oops() + Self::extra_oops;
 }
 
 template<typename Self>
@@ -2166,19 +2150,32 @@ private:
   intptr_t* _safepoint_stub_hsp;
 #endif
 
-  template<typename FKind> static inline frame sender(const frame& f);
   template <typename FKind, bool top, bool bottom> inline void patch_pd(const frame& f, hframe& callee, const hframe& caller);
   template <bool bottom> inline void align(const hframe& caller);
   inline void relativize_interpreted_frame_metadata(const frame& f, intptr_t* vsp, const hframe& hf);
   template<bool cont_empty> hframe new_bottom_hframe(int sp, int ref_sp, address pc, bool interpreted);
   template<typename FKind> hframe new_hframe(const frame& f, intptr_t* vsp, const hframe& caller, int fsize, int num_oops);
-  static frame chunk_start_frame_pd(oop chunk, intptr_t* sp);
   inline intptr_t* align_bottom(intptr_t* vsp, int argsize);
 
   inline bool is_chunk() { return _chunk != (oop)NULL; }
 
   void relativize_sp(frame& f)   { f.set_offset_sp(f.sp() - _top_address); }
   void derelativize_sp(frame& f) { f.set_sp(f.offset_sp() + _top_address); }
+
+  template<typename FKind>
+  static inline frame sender_for_compiled_frame(const frame& f);
+  static inline frame sender_for_interpreted_frame(const frame& f);
+
+  template<typename FKind>
+  static inline frame sender(const frame& f) {
+    assert (FKind::is_instance(f), "");
+    if (FKind::interpreted) {
+      return sender_for_interpreted_frame(f);
+    } else {
+      return sender_for_compiled_frame<FKind>(f);
+    }
+  }
+
 public:
 
   Freeze(JavaThread* thread, ContMirror& mirror) :
@@ -2240,7 +2237,7 @@ public:
 
 
     log_develop_trace(jvmcont)("squash chunk bottom_address: " INTPTR_FORMAT " argsize: %d size: %d oops: %d frames: %d", p2i(_bottom_address), argsize, _size, _oops, _frames);
-    if (log_develop_is_enabled(Trace, jvmcont)) print_chunk(chunk, _cont.mirror(), true);
+    if (log_develop_is_enabled(Trace, jvmcont)) InstanceStackChunkKlass::print_chunk(chunk, true);
   }
 
   void init_rest() { // we want to postpone some initialization after chunk handling
@@ -2554,11 +2551,11 @@ public:
     // jdk_internal_misc_StackChunk::set_gc_sp(chunk, sp);
 
     log_develop_trace(jvmcont)("Young chunk success");
-    if (log_develop_is_enabled(Debug, jvmcont)) print_chunk(chunk, _cont.mirror(), true);
+    if (log_develop_is_enabled(Debug, jvmcont)) InstanceStackChunkKlass::print_chunk(chunk, true);
 
     log_develop_trace(jvmcont)("FREEZE CHUNK #" INTPTR_FORMAT, _cont.hash());
     assert (_cont.chunk_invariant(), "");
-    assert (Continuation::debug_verify_stack_chunk(chunk), "");
+    assert (InstanceStackChunkKlass::verify(chunk), "");
 
   #if CONT_JFR
     EventContinuationFreezeYoung e;
@@ -2625,7 +2622,7 @@ public:
     address pc = NULL;
     for (oop chunk = _cont.tail(); chunk != (oop)NULL; chunk = jdk_internal_misc_StackChunk::parent(chunk)) {
       if (jdk_internal_misc_StackChunk::is_empty(chunk)) continue;
-      intptr_t* sp =jdk_internal_misc_StackChunk::start_address(chunk) + jdk_internal_misc_StackChunk::sp(chunk);
+      intptr_t* sp =jdk_internal_misc_StackChunk::sp_address(chunk);
       pc = *(address*)(sp - 1);
       break;
     }
@@ -2689,7 +2686,7 @@ public:
 
     int orig_frames = _frames;
 
-    frame f = chunk_start_frame(_chunk);
+    frame f = StackChunkFrameStream(_chunk).to_frame();
     _top_address = f.sp();
     f.get_cb();
     hframe caller;
@@ -2777,11 +2774,6 @@ public:
     if (log_develop_is_enabled(Debug, jvmcont)) f.print_on(tty);
 
     return f;
-  }
-
-  static frame chunk_start_frame(oop chunk) {
-    intptr_t* sp = jdk_internal_misc_StackChunk::start_address(chunk) + jdk_internal_misc_StackChunk::sp(chunk);
-    return chunk_start_frame_pd(chunk, sp);
   }
 
   template<bool top>
@@ -2965,7 +2957,7 @@ public:
     _chunk = chunkh();
 
     if (is_chunk()) {
-      _top_address = jdk_internal_misc_StackChunk::start_address(_chunk) + jdk_internal_misc_StackChunk::sp(_chunk); // TODO: add method to jdk_internal_misc_StackChunk
+      _top_address = jdk_internal_misc_StackChunk::sp_address(_chunk);
     } else {
       _cont.add_size(_size); // chunk's size has already been added when originally freezing it
     }
@@ -3111,7 +3103,7 @@ public:
     assert (!is_chunk(), "");
     // ResourceMark rm(_thread);
     InterpreterOopMap mask;
-    Interpreted::oop_map(f, &mask);
+    f.interpreted_frame_oop_map(&mask);
     int fsize = Interpreted::size(f, &mask);
     int oops  = Interpreted::num_oops(f, &mask);
 
@@ -3853,8 +3845,6 @@ private:
   void derelativize_interpreted_frame_metadata(const hframe& hf, const frame& f);
   inline hframe::callee_info frame_callee_info_address(frame& f);
   template<typename FKind, bool top, bool bottom> inline intptr_t* align(const hframe& hf, intptr_t* vsp, frame& caller);
-  void deoptimize_frames_in_chunk(oop chunk);
-  void deoptimize_frame_in_chunk(intptr_t* sp, address pc, CodeBlob* cb);
   void patch_chunk_pd(intptr_t* sp);
   inline intptr_t* align_chunk(intptr_t* vsp);
   inline void prefetch_chunk_pd(void* start, int size_words);
@@ -3911,7 +3901,7 @@ public:
 
   #ifdef ASSERT
     log_develop_debug(jvmcont)("Jumping to frame (thaw): [%ld]", java_tid(_thread));
-    frame f = sp_to_frame(sp);
+    frame f(sp);
     if (log_develop_is_enabled(Debug, jvmcont)) f.print_on(tty);
   #endif
 
@@ -3974,7 +3964,7 @@ public:
     static const int threshold = 500; // words
 
     log_develop_trace(jvmcont)("thaw_chunk");
-    if (log_develop_is_enabled(Debug, jvmcont)) print_chunk(chunk, _cont.mirror(), true);
+    if (log_develop_is_enabled(Debug, jvmcont)) InstanceStackChunkKlass::print_chunk(chunk, true);
 
     int sp = jdk_internal_misc_StackChunk::sp(chunk);
     int size = jdk_internal_misc_StackChunk::size(chunk) + frame_metadata - sp;
@@ -3991,7 +3981,7 @@ public:
     DEBUG_ONLY(bool fix = false;)
     if (UNLIKELY(should_fix(chunk))) {
       DEBUG_ONLY(fix = true;)
-      fix_stack_chunk(chunk);
+      InstanceStackChunkKlass::fix_chunk(chunk);
     }
 
     assert (verify_stack_chunk<1>(chunk), "");
@@ -4026,7 +4016,7 @@ public:
       size -= argsize;
 
       if (UNLIKELY(barriers)) {
-        ContinuationHelper::barriers_for_oops_in_chunk<true>(chunk);
+        InstanceStackChunkKlass::barriers_for_oops_in_chunk<true>(chunk);
       }
       
       if (mode != mode_fast && should_deoptimize()) {
@@ -4134,39 +4124,27 @@ public:
     return false;
   }
 
-  inline bool oop_fixed(oop obj, int offset) {
-    typedef typename ConfigT::OopT OopT;
-    OopT* loc = obj->obj_field_addr<OopT>(offset);
-    intptr_t before = *(intptr_t*)loc;
-    intptr_t after = cast_from_oop<intptr_t>(HeapAccess<>::oop_load(loc));
-    // tty->print_cr("!oop_fixed %d", before != after);
-    return before == after;
-  }
-
   NOINLINE bool thaw_one_frame_from_chunk(oop chunk, intptr_t* hsp, int* out_size, int* out_argsize, bool barriers) {
-    assert (hsp == jdk_internal_misc_StackChunk::start_address(chunk) + jdk_internal_misc_StackChunk::sp(chunk), "");
+    StackChunkFrameStream f(chunk);
+    assert (hsp == f.sp(), "");
 
-    address pc = *(address*)(hsp - SENDER_SP_RET_ADDRESS_OFFSET);
-    int slot;
-    CodeBlob* cb = ContinuationCodeBlobLookup::find_blob_and_oopmap(pc, slot);
+    // tty->print_cr(">>>> thaw_one_frame_from_chunk thawing: "); f.cb()->print_value_on(tty);
+
+    if (UNLIKELY(barriers)) {
+      InstanceStackChunkKlass::barriers_for_oops_in_frame<true>(f);
+    }
+
+    if (should_deoptimize()
+        && (f.cb()->as_compiled_method()->is_marked_for_deoptimization() || (mode != mode_fast && _thread->is_interp_only_mode()))) {
+      deoptimize_frame_in_chunk(f);
+      f.handle_deopted();
+    }
+
+    CodeBlob* cb = f.cb();
     int size = cb->frame_size(); // in words
     int argsize = (cb->as_compiled_method()->method()->num_stack_arg_slots() * VMRegImpl::stack_slot_size) >> LogBytesPerWord; // in words
 
-    // tty->print_cr(">>>> thaw_one_frame_from_chunk thawing: "); cb->print_value_on(tty);
-
-    if (should_deoptimize()
-        && (cb->as_compiled_method()->is_marked_for_deoptimization() || (mode != mode_fast && _thread->is_interp_only_mode()))) {
-      deoptimize_frame_in_chunk(hsp, pc, cb);
-    }
-
-    if (UNLIKELY(barriers)) {
-      assert (slot >= 0, "");
-      const ImmutableOopMap* oopmap = cb->oop_map_for_slot(slot, pc);
-      assert (oopmap != NULL, "");
-      ContinuationHelper::barriers_for_oops_in_frame<true>(hsp, cb, oopmap);
-    }
-
-    int empty = jdk_internal_misc_StackChunk::sp(chunk) + size >= (jdk_internal_misc_StackChunk::size(chunk) - jdk_internal_misc_StackChunk::argsize(chunk));
+    bool empty = (jdk_internal_misc_StackChunk::sp(chunk) + size) >= (jdk_internal_misc_StackChunk::size(chunk) - jdk_internal_misc_StackChunk::argsize(chunk));
     assert (!empty || argsize == jdk_internal_misc_StackChunk::argsize(chunk), "");
 
     if (empty) {
@@ -4182,6 +4160,7 @@ public:
         // assert (0 == jdk_internal_misc_StackChunk::numOops(chunk) - cb->oop_map_for_slot(slot, pc)->num_oops(), "");
         // jdk_internal_misc_StackChunk::set_numOops(chunk, 0);
       // }
+      assert((f.next(), f.is_done()), "");
     } else {
       jdk_internal_misc_StackChunk::set_sp(chunk, jdk_internal_misc_StackChunk::sp(chunk) + size);
       address top_pc = *(address*)(hsp + size - SENDER_SP_RET_ADDRESS_OFFSET);
@@ -4195,6 +4174,7 @@ public:
       //   assert (jdk_internal_misc_StackChunk::numOops(chunk) >= oopmap->num_oops(), "jdk_internal_misc_StackChunk::numOops(chunk): %d oopmap->num_oops() : %d", jdk_internal_misc_StackChunk::numOops(chunk), oopmap->num_oops());
       //   jdk_internal_misc_StackChunk::set_numOops(chunk, jdk_internal_misc_StackChunk::numOops(chunk) - oopmap->num_oops());
       // }
+      assert((f.next(), !f.is_done()), "");
     }
 
     *out_size = size;
@@ -4217,6 +4197,28 @@ public:
     log_develop_trace(jvmcont)("thaw_chunk is_last: %d sp: " INTPTR_FORMAT " patching pc at " INTPTR_FORMAT " to " INTPTR_FORMAT, is_last, p2i(sp), p2i(sp - SENDER_SP_RET_ADDRESS_OFFSET), p2i(pc));
 
     // patch_chunk_pd(sp);
+  }
+
+  void deoptimize_frames_in_chunk(oop chunk) {
+    for (StackChunkFrameStream f(chunk); !f.is_done(); f.next()) {
+      if (f.cb()->as_compiled_method()->is_marked_for_deoptimization() || _thread->is_interp_only_mode()) {
+        deoptimize_frame_in_chunk(f);
+      }
+    }
+  }
+
+  void deoptimize_frame_in_chunk(const StackChunkFrameStream& f) {
+    log_develop_trace(jvmcont)("Deoptimizing frame");
+    f.to_frame().deoptimize(NULL);
+  }
+
+  inline bool oop_fixed(oop obj, int offset) {
+    typedef typename ConfigT::OopT OopT;
+    OopT* loc = obj->obj_field_addr<OopT>(offset);
+    intptr_t before = *(intptr_t*)loc;
+    intptr_t after = cast_from_oop<intptr_t>(HeapAccess<>::oop_load(loc));
+    // tty->print_cr("!oop_fixed %d", before != after);
+    return before == after;
   }
 
   template<bool top>
@@ -4770,7 +4772,7 @@ static inline intptr_t* thaw0(JavaThread* thread, const thaw_kind kind) {
 
   if (log_develop_is_enabled(Trace, jvmcont)) {
     log_develop_trace(jvmcont)("Jumping to frame (thaw):");
-    frame f = sp_to_frame(sp);
+    frame f(sp);
     print_vframe(f, NULL);
   }
 
@@ -4918,13 +4920,13 @@ static ContinuationEntry* get_continuation_entry_for_frame(JavaThread* thread, i
   return cont;
 }
 
-static oop get_continuation_for_frame(JavaThread* thread, intptr_t* const sp) {
+static oop get_continuation_for_sp(JavaThread* thread, intptr_t* const sp) {
   ContinuationEntry* cont = get_continuation_entry_for_frame(thread, sp);
   return cont != NULL ? cont->continuation() : (oop)NULL;
 }
 
-oop Continuation::get_continutation_for_frame(JavaThread* thread, const frame& f) {
-  return get_continuation_for_frame(thread, f.unextended_sp());
+oop Continuation::get_continuation_for_frame(JavaThread* thread, const frame& f) {
+  return get_continuation_for_sp(thread, f.unextended_sp());
 }
 
 ContinuationEntry* Continuation::get_continuation_entry_for_continuation(JavaThread* thread, oop cont) {
@@ -5012,7 +5014,7 @@ bool Continuation::is_scope_bottom(oop cont_scope, const frame& f, const Registe
   assert (!map->in_cont(), "");
   // if (map->in_cont()) return false;
 
-  oop cont = get_continuation_for_frame(map->thread(), f.sp());
+  oop cont = get_continuation_for_sp(map->thread(), f.sp());
   if (cont == NULL)
     return false;
 
@@ -5021,14 +5023,22 @@ bool Continuation::is_scope_bottom(oop cont_scope, const frame& f, const Registe
   return sc == cont_scope;
 }
 
-static frame chunk_top_frame_pd(oop chunk, intptr_t* sp, RegisterMap* map);
-
-static frame chunk_top_frame(oop chunk, RegisterMap* map, size_t offset, size_t index) {
-  intptr_t* sp = jdk_internal_misc_StackChunk::start_address(chunk) + jdk_internal_misc_StackChunk::sp(chunk);
-  frame f = chunk_top_frame_pd(chunk, sp, map);
-  f.set_offset_sp(offset);
+static frame relativize_chunk_frame(frame f, oop chunk, size_t chunk_offset, size_t index) {
+  f.set_offset_sp(chunk_offset + (f.sp() - jdk_internal_misc_StackChunk::sp_address(chunk)));
   f.set_frame_index(index);
   return f;
+}
+
+static frame derelativize_chunk_frame(frame f, oop chunk, size_t chunk_offset) {
+  intptr_t* sp = jdk_internal_misc_StackChunk::sp_address(chunk) + (f.offset_sp() - chunk_offset);
+  f.set_sp(sp);
+  return f;
+}
+
+static frame chunk_top_frame(oop chunk, RegisterMap* map, size_t offset, size_t index) {
+  frame f = StackChunkFrameStream(chunk).to_frame();
+  update_map_for_chunk_frame(map);
+  return relativize_chunk_frame(f, chunk, offset, index);
 }
 
 static frame continuation_body_top_frame(ContMirror& cont, RegisterMap* map) {
@@ -5114,7 +5124,7 @@ javaVFrame* Continuation::last_java_vframe(Handle continuation, RegisterMap *map
 frame Continuation::top_frame(const frame& callee, RegisterMap* map) {
   assert (map != NULL, "");
   assert (map->thread() != NULL, "");
-  oop cont = get_continuation_for_frame(map->thread(), callee.sp());
+  oop cont = get_continuation_for_sp(map->thread(), callee.sp());
   return continuation_top_frame(cont, map);
 }
 
@@ -5133,22 +5143,15 @@ static frame sender_for_frame(const frame& f, RegisterMap* map) {
     size_t chunk_offset;
     oop chunk = cont.find_chunk(f.offset_sp(), &chunk_offset);
     assert (!jdk_internal_misc_StackChunk::is_empty(chunk), "");
-    assert (chunk != (oop)NULL, "");
-    intptr_t* chunk_sp = jdk_internal_misc_StackChunk::start_address(chunk) + jdk_internal_misc_StackChunk::sp(chunk);
-    intptr_t* sp = chunk_sp + (f.offset_sp() - chunk_offset);
-
-    frame f = sp_to_frame(sp);
-    if (ContMirror::is_in_chunk(chunk, sp + f.cb()->frame_size() + jdk_internal_misc_StackChunk::argsize(chunk) + frame_metadata)) {
-      frame sender = sp_to_frame(sp + f.cb()->frame_size());
-
-      assert (ContMirror::is_usable_in_chunk(chunk, sender.unextended_sp()), "");
-      sender.set_offset_sp(chunk_offset + (sender.sp() - chunk_sp));
-      sender.set_frame_index(frame_index + 1);
-      if (map->update_map()) {
-        frame::update_map_with_saved_link(map, (intptr_t**)(intptr_t)(-2 * BytesPerWord)); // for chunk frames, we store offset TODO PD
-      }
-      return sender;
+    StackChunkFrameStream fs(chunk, derelativize_chunk_frame(f, chunk, chunk_offset));
+    fs.next();
+    if (!fs.is_done()) {
+      frame sender = fs.to_frame();
+      assert (jdk_internal_misc_StackChunk::is_usable_in_chunk(chunk, sender.unextended_sp()), "");
+      update_map_for_chunk_frame(map);
+      return relativize_chunk_frame(sender, chunk, chunk_offset, frame_index + 1);
     }
+
     const size_t end = jdk_internal_misc_StackChunk::size(chunk) - jdk_internal_misc_StackChunk::argsize(chunk);
     chunk_offset += end - jdk_internal_misc_StackChunk::sp(chunk);
     chunk = jdk_internal_misc_StackChunk::parent(chunk);
@@ -5299,7 +5302,7 @@ bool Continuation::is_in_usable_stack(address addr, const RegisterMap* map) {
 
   oop chunk = cont.find_chunk_by_address(addr);
   assert (((intptr_t**)addr == Frame::map_link_address(map)) || (map->in_chunk() == (chunk != (oop)NULL)), "map->in_chunk(): %d", map->in_chunk());
-  return (chunk != (oop)NULL) ? ContMirror::is_usable_in_chunk(chunk, addr)
+  return (chunk != (oop)NULL) ? jdk_internal_misc_StackChunk::is_usable_in_chunk(chunk, addr)
                               : (cont.is_in_stack(addr) || cont.is_in_ref_stack(addr)
                                  || (intptr_t**)addr == java_lang_Continuation::raw_fp_address(cont.mirror())); // TODO PD
 }
@@ -6235,7 +6238,7 @@ bool Continuation::debug_is_stack_chunk(oop obj) {
 
 void Continuation::debug_print_stack_chunk(oop chunk) {
   assert (debug_is_stack_chunk(chunk), "");
-  print_chunk(chunk, NULL, false);
+  InstanceStackChunkKlass::print_chunk(chunk, true);
 }
 
 bool Continuation::debug_is_continuation(Klass* klass) {
@@ -6278,7 +6281,7 @@ NOINLINE bool Continuation::debug_verify_continuation(oop contOop) {
   int num_chunks = 0;
   for (oop chunk = cont.tail(); chunk != (oop)NULL; chunk = jdk_internal_misc_StackChunk::parent(chunk)) {
     num_chunks++;
-    debug_verify_stack_chunk(chunk, contOop, &max_size);
+    InstanceStackChunkKlass::verify(chunk, contOop, &max_size);
     if (!jdk_internal_misc_StackChunk::is_empty(chunk)) {
       callee_compiled = true;
       callee_argsize = jdk_internal_misc_StackChunk::argsize(chunk) << LogBytesPerWord;
@@ -6364,7 +6367,7 @@ void Continuation::debug_print_continuation(oop contOop, outputStream* st) {
   st->print_cr("CHUNKS:");
   for (oop chunk = cont.tail(); chunk != (oop)NULL; chunk = jdk_internal_misc_StackChunk::parent(chunk)) {
     st->print("* ");
-    print_chunk(chunk, contOop, true);
+    InstanceStackChunkKlass::print_chunk(chunk, true);
   }
 
   st->print_cr("frames: %d interpreted frames: %d oops: %d", cont.num_frames(), cont.num_interpreted_frames(), cont.num_oops());
@@ -6434,6 +6437,47 @@ static void print_frames(JavaThread* thread, outputStream* st) {
   st->print_cr("======= end frames =========");
 }
 
+static bool assert_entry_frame_laid_out(JavaThread* thread) {
+  assert (thread->has_last_Java_frame(), "Wrong place to use this assertion");
+
+  ContinuationEntry* cont = Continuation::get_continuation_entry_for_continuation(thread, get_continuation(thread));
+  assert (cont != NULL, "");
+
+  intptr_t* unextended_sp = cont->entry_sp();
+  intptr_t* sp;
+  if (cont->argsize() > 0) {
+    sp = cont->bottom_sender_sp();
+  } else {
+    sp = NULL;
+    RegisterMap map(thread, false, false, false);
+    for (frame f = thread->last_frame(); !f.is_first_frame() && f.sp() <= unextended_sp; f = f.sender(&map)) sp = f.sp();
+  }
+  assert (sp != NULL && sp <= cont->bottom_sender_sp(), "sp: %p bottom_sender_sp: %p", sp, cont->bottom_sender_sp());
+  address pc = *(address*)(sp - SENDER_SP_RET_ADDRESS_OFFSET);
+
+  if (pc != StubRoutines::cont_returnBarrier()) {
+    CodeBlob* cb = pc != NULL ? CodeCache::find_blob(pc) : NULL;
+
+    if (cb == NULL || !cb->is_compiled() || !cb->as_compiled_method()->method()->is_continuation_enter_intrinsic()) {
+      pfl();
+
+      tty->print_cr(">>>>>>><<<<<<<<<");
+      tty->print_cr(">>>> entry unextended_sp: %p sp: %p", unextended_sp, sp);
+      if (cb == NULL) tty->print_cr("NULL"); else cb->print_on(tty);
+      os::print_location(tty, (intptr_t)pc);
+     }
+  
+    assert (cb != NULL, "");
+    assert (cb->is_compiled(), "");
+    assert (cb->as_compiled_method()->method()->is_continuation_enter_intrinsic(), "");
+  }
+
+  // intptr_t* fp = *(intptr_t**)(sp - frame::sender_sp_offset);
+  // assert (cont->entry_fp() == fp, "entry_fp: " INTPTR_FORMAT " actual: " INTPTR_FORMAT, p2i(cont->entry_sp()), p2i(fp));
+  
+  return true;
+}
+
 // static inline bool is_not_entrant(const frame& f) {
 //   return  f.is_compiled_frame() ? f.cb()->as_nmethod()->is_not_entrant() : false;
 // }
@@ -6455,61 +6499,6 @@ static inline Method* top_java_frame_method(const frame& f) {
   }
   // m = ((CompiledMethod*)f.cb())->method();
   return m;
-}
-
-void print_chunk(oop chunk, oop cont, bool verbose) {
-  if (chunk == (oop)NULL) {
-    tty->print_cr("CHUNK NULL");
-    return;
-  }
-  // tty->print_cr("CHUNK " INTPTR_FORMAT " ::", p2i((oopDesc*)chunk));
-  assert(jdk_internal_misc_StackChunk::is_stack_chunk(chunk), "");
-  // HeapRegion* hr = G1CollectedHeap::heap()->heap_region_containing(chunk);
-  tty->print_cr("CHUNK " INTPTR_FORMAT " - " INTPTR_FORMAT " :: 0x%lx", p2i((oopDesc*)chunk), p2i((HeapWord*)(chunk + chunk->size())), chunk->identity_hash());
-  tty->print("CHUNK " INTPTR_FORMAT " young: %d gc_mode: %d, size: %d argsize: %d sp: %d num_frames: %d num_oops: %d parent: " INTPTR_FORMAT,
-    p2i((oopDesc*)chunk), !requires_barriers(chunk), jdk_internal_misc_StackChunk::gc_mode(chunk),
-    jdk_internal_misc_StackChunk::size(chunk), jdk_internal_misc_StackChunk::argsize(chunk), jdk_internal_misc_StackChunk::sp(chunk),
-    jdk_internal_misc_StackChunk::numFrames(chunk), jdk_internal_misc_StackChunk::numOops(chunk),
-    p2i((oopDesc*)jdk_internal_misc_StackChunk::parent(chunk)));
-  if (cont != (oop)NULL) {
-    int i=0;
-    for (oop c = java_lang_Continuation::tail(cont); c != (oop)NULL && c != chunk; c = jdk_internal_misc_StackChunk::parent(c), i++);
-    tty->print(" #%d parent: ", i);
-    if (jdk_internal_misc_StackChunk::parent(chunk) == (oop)NULL)
-      tty->print("NULL");
-    else
-      tty->print("%d", i+1);
-  }
-
-  intptr_t* start = jdk_internal_misc_StackChunk::start_address(chunk);
-  intptr_t* end   = jdk_internal_misc_StackChunk::end_address(chunk);
-
-  if (verbose) {
-    intptr_t* sp = start + jdk_internal_misc_StackChunk::sp(chunk);
-    tty->cr();
-    tty->print_cr("------ chunk frames end: " INTPTR_FORMAT, p2i(end));
-    if (sp < end) {
-      RegisterMap map(NULL, true, false, false);
-      frame f = create_frame(sp);
-      tty->print_cr("-- frame size: %d argsize: %d", Compiled::size(f), Compiled::stack_argsize(f));
-      f.print_on(tty);
-      while (f.sp() + ((Compiled::size(f) + Compiled::stack_argsize(f)) >> LogBytesPerWord) < end) {
-        f = f.sender(&map);
-        tty->print_cr("-- frame size: %d argsize: %d", Compiled::size(f), Compiled::stack_argsize(f));
-        f.print_on(tty);
-      }
-    }
-    tty->print_cr("------");
-  } else {
-    int frames = 0;
-    CodeBlob* cb = NULL;
-    for (intptr_t* sp = start + jdk_internal_misc_StackChunk::sp(chunk); sp < end; sp += cb->frame_size()) {
-      address pc = *(address*)(sp - SENDER_SP_RET_ADDRESS_OFFSET);
-      cb = ContinuationCodeBlobLookup::find_blob(pc);
-      frames++;
-    }
-    tty->print_cr(" frames: %d", frames);
-  }
 }
 
 static inline Method* bottom_java_frame_method(const frame& f) {
@@ -6545,7 +6534,6 @@ static inline bool is_deopt_return(address pc, const frame& sender) {
   return cm->is_deopt_pc(pc);
 }
 
-#ifdef ASSERT
 //static bool is_deopt_pc(const frame& f, address pc) {
 //  return f.is_compiled_frame() && f.cb()->as_compiled_method()->is_deopt_pc(pc);
 //}
@@ -6553,7 +6541,6 @@ static inline bool is_deopt_return(address pc, const frame& sender) {
 //  CodeBlob* cb = CodeCache::find_blob(pc);
 //  return cb != NULL && cb->is_compiled() && cb->as_compiled_method()->is_deopt_pc(pc);
 //}
-#endif
 
 template <typename FrameT>
 static CodeBlob* slow_get_cb(const FrameT& f) {

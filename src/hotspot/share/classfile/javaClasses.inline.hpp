@@ -119,8 +119,8 @@ oop java_lang_ref_Reference::unknown_referent(oop ref) {
   return ref->obj_field_access<ON_UNKNOWN_OOP_REF>(_referent_offset);
 }
 
-void java_lang_ref_Reference::set_referent_raw(oop ref, oop value) {
-  ref->obj_field_put_raw(_referent_offset, value);
+void java_lang_ref_Reference::clear_referent(oop ref) {
+  ref->obj_field_put_raw(_referent_offset, nullptr);
 }
 
 HeapWord* java_lang_ref_Reference::referent_addr_raw(oop ref) {
@@ -389,6 +389,17 @@ inline bool jdk_internal_misc_StackChunk::is_empty(oop chunk) {
 
 inline intptr_t* jdk_internal_misc_StackChunk::start_address(oop chunk) {
   return (intptr_t*)InstanceStackChunkKlass::start_of_stack(chunk);
+}
+
+inline intptr_t* jdk_internal_misc_StackChunk::sp_address(oop chunk) {
+  return start_address(chunk) + sp(chunk);
+}
+
+inline bool jdk_internal_misc_StackChunk::is_in_chunk(oop chunk, void* p) {
+  assert (is_stack_chunk(chunk), "");
+  HeapWord* start = InstanceStackChunkKlass::start_of_stack(chunk);
+  HeapWord* end = start + jdk_internal_misc_StackChunk::size(chunk);
+  return (HeapWord*)p >= start && (HeapWord*)p < end;
 }
 
 inline void java_lang_invoke_CallSite::set_target_volatile(oop site, oop target) {
