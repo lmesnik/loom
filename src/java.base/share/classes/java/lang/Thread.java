@@ -114,7 +114,7 @@ public class Thread implements Runnable {
 
     /* Reserved for exclusive use by the JVM, TBD: move to FieldHolder */
     private long eetop;
- 
+
     // used by JVMTI to store JvmtiThreadState link
     private volatile long jvmtiThreadState;
 
@@ -1733,7 +1733,8 @@ public class Thread implements Runnable {
             if (task != null) {
                 String name = this.getClass().getName();
                 //                System.out.println("Starting thread: " + this.getClass().getName());
-                if (name.equals("jdk.internal.misc.InnocuousThread")
+                if (System.getProperty("main.wrapper") == null
+                    ||name.equals("jdk.internal.misc.InnocuousThread")
                     || name.contains("CarrierThread")) {
                     task.run();
                 } else {
