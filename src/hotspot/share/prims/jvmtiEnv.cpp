@@ -38,6 +38,7 @@
 #include "memory/resourceArea.hpp"
 #include "memory/universe.hpp"
 #include "oops/instanceKlass.hpp"
+#include "oops/klass.inline.hpp"
 #include "oops/objArrayOop.inline.hpp"
 #include "oops/oop.inline.hpp"
 #include "prims/jniCheck.hpp"
@@ -558,7 +559,7 @@ JvmtiEnv::SetEventNotificationMode(jvmtiEventMode mode, jvmtiEvent event_type, j
     // ThreadsListHandle that is common to both thread-specific and
     // global code paths.
 
-    JvmtiEventController::set_user_enabled(this, (JavaThread*) NULL, event_type, enabled);
+    JvmtiEventController::set_user_enabled(this, (JavaThread*) NULL, (oop) NULL, event_type, enabled);
   } else {
     // We have a specified event_thread.
     JavaThread* java_thread = NULL;
@@ -581,7 +582,7 @@ JvmtiEnv::SetEventNotificationMode(jvmtiEventMode mode, jvmtiEvent event_type, j
       return JVMTI_ERROR_MUST_POSSESS_CAPABILITY;
     }
 
-    JvmtiEventController::set_user_enabled(this, java_thread, event_type, enabled);
+    JvmtiEventController::set_user_enabled(this, java_thread, thread_obj, event_type, enabled);
   }
 
   return JVMTI_ERROR_NONE;

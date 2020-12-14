@@ -170,6 +170,8 @@ class ThreadExecutor implements ExecutorService {
      */
     private Thread newThread(Runnable task) {
         Thread thread = factory.newThread(task);
+        if (thread == null)
+            throw new RejectedExecutionException();
         //JLA.unsafeSetLifetime(thread, lifetime);  // experimental
         return thread;
     }
@@ -222,8 +224,6 @@ class ThreadExecutor implements ExecutorService {
         Objects.requireNonNull(task);
         ensureNotShutdown();
         Thread thread = newThread(new TaskRunner(this, task));
-        if (thread == null)
-            throw new RejectedExecutionException();
         start(thread);
         return thread;
     }
@@ -232,32 +232,25 @@ class ThreadExecutor implements ExecutorService {
     public void execute(Runnable task) {
         start(task);
     }
-
+    
     @Override
-    public <T> CompletableFuture<T> submitTask(Callable<T> task) {
+    public <T> Future<T> submit(Callable<T> task) {
         Objects.requireNonNull(task);
         ensureNotShutdown();
-        var future = new ThreadBoundCompletableFuture<>(this, task);
+        var future = new ThreadBoundFuture<>(this, task);
         Thread thread = future.thread();
-        if (thread == null)
-            throw new RejectedExecutionException();
         start(thread);
         return future;
     }
 
     @Override
-    public <T> Future<T> submit(Callable<T> task) {
-        return submitTask(task);
-    }
-
-    @Override
     public Future<?> submit(Runnable task) {
-        return submitTask(Executors.callable(task));
+        return submit(Executors.callable(task));
     }
 
     @Override
     public <T> Future<T> submit(Runnable task, T result) {
-        return submitTask(Executors.callable(task, result));
+        return submit(Executors.callable(task, result));
     }
 
     /**
@@ -281,19 +274,19 @@ class ThreadExecutor implements ExecutorService {
     }
 
     /**
-     * A CompletableFuture for a task that runs in its own thread. The thread
-     * is created (but not started) when the CompletableFuture is created. The
+     * A Future for a task that runs in its own thread. The thread
+     * is created (but not started) when the Future is created. The
      * thread is interrupted when the future is cancelled. Its ThreadExecutor
      * is notified when the task completes.
      */
-    private static class ThreadBoundCompletableFuture<T>
+    private static class ThreadBoundFuture<T>
             extends CompletableFuture<T> implements Runnable {
 
         final ThreadExecutor executor;
         final Callable<T> task;
         final Thread thread;
 
-        ThreadBoundCompletableFuture(ThreadExecutor executor, Callable<T> task) {
+        ThreadBoundFuture(ThreadExecutor executor, Callable<T> task) {
             this.executor = executor;
             this.task = task;
             this.thread = executor.newThread(this);
