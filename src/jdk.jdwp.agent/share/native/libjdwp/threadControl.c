@@ -61,19 +61,19 @@ typedef struct CoLocatedEventInfo_ {
  *
  * suspendCount is the number of outstanding suspends
  * from the debugger. suspends from the app itself are
- * not included in this count.
+ * not int ncluded in this count.
  */
 typedef struct ThreadNode {
+    int popFrameThread;
     jthread thread;
-    unsigned int toBeResumed : 1;      /* true if this thread was successfully suspended. */
-    unsigned int pendingInterrupt : 1; /* true if thread is interrupted while handling an event. */
-    unsigned int isDebugThread : 1;    /* true if this is one of our debug agent threads. */
-    unsigned int suspendOnStart : 1;   /* true for new threads if we are currently in a VM.suspend(). */
-    unsigned int isStarted : 1;        /* THREAD_START or VIRTUAL_THREAD_SCHEDULED event received. */
-    unsigned int is_vthread : 1;
-    unsigned int popFrameEvent : 1;
-    unsigned int popFrameProceed : 1;
-    unsigned int popFrameThread : 1;
+    unsigned int toBeResumed;      /* true if this thread was successfully suspended. */
+    unsigned int pendingInterrupt; /* true if thread is interrupted while handling an event. */
+    unsigned int isDebugThread;    /* true if this is one of our debug agent threads. */
+    unsigned int suspendOnStart;   /* true for new threads if we are currently in a VM.suspend(). */
+    unsigned int isStarted;        /* THREAD_START or VIRTUAL_THREAD_SCHEDULED event received. */
+    unsigned int is_vthread;
+    unsigned int popFrameEvent;
+    unsigned int popFrameProceed;
     EventIndex current_ei; /* Used to determine if we are currently handling an event on this thread. */
     jobject pendingStop;   /* Object we are throwing to stop the thread (ThreadReferenceImpl.stop). */
     jint suspendCount;
@@ -164,6 +164,17 @@ getStackDepth(jthread thread)
     return count;
 }
 
+static void checkNode(int line, ThreadNode* node) {
+  if (node == NULL) {
+    return;
+  }
+  if (node->popFrameThread != 0 && node->popFrameThread != 1) {
+    printf("EEEEEEEEEERRRRRROOOOORRRRRRRRRRR %d in line: %d\n", node->popFrameThread, line);
+  }
+}
+
+#define CN(node) checkNode(__LINE__, node)
+
 /* Get the state of the thread direct from JVMTI */
 static jvmtiError
 threadState(jthread thread, jint *pstate)
@@ -178,16 +189,28 @@ static void
 setThreadLocalStorage(jthread thread, ThreadNode *node)
 {
     jvmtiError  error;
+    jvmtiThreadInfo info;
+    memset(&info, 0, sizeof(info));
+    error = JVMTI_FUNC_PTR(gdata->jvmti,GetThreadInfo)
+      (gdata->jvmti, thread, &info);
+
+    if (node != NULL) {
+      printf("Setting local storage for thread %s popFT %d\n", info.name, node->popFrameThread);
+    }
 
     error = JVMTI_FUNC_PTR(gdata->jvmti,SetThreadLocalStorage)
             (gdata->jvmti, thread, (void*)node);
     if ( error == JVMTI_ERROR_THREAD_NOT_ALIVE ) {
+      printf("WAAAAAAAAARN Exiting too early for %s\n", info.name);
+      jvmtiDeallocate(info.name);
         /* Just return, thread hasn't started yet */
         return;
     } else if ( error != JVMTI_ERROR_NONE ) {
+      jvmtiDeallocate(info.name);
         /* The jthread object must be valid, so this must be a fatal error */
         EXIT_ERROR(error, "cannot set thread local storage");
     }
+  jvmtiDeallocate(info.name);
 }
 
 /* Get TLS on a specific jthread, which is the ThreadNode* */
@@ -195,7 +218,12 @@ static ThreadNode *
 getThreadLocalStorage(jthread thread)
 {
     jvmtiError  error;
+  jvmtiThreadInfo info;
     ThreadNode *node;
+
+  memset(&info, 0, sizeof(info));
+  error = JVMTI_FUNC_PTR(gdata->jvmti,GetThreadInfo)
+      (gdata->jvmti, thread, &info);
 
     node = NULL;
     error = JVMTI_FUNC_PTR(gdata->jvmti,GetThreadLocalStorage)
@@ -206,6 +234,11 @@ getThreadLocalStorage(jthread thread)
     } else if ( error != JVMTI_ERROR_NONE ) {
         /* The jthread object must be valid, so this must be a fatal error */
         EXIT_ERROR(error, "cannot get thread local storage");
+    }
+    if (node != NULL) {
+      if (node->popFrameThread != 0 && node->popFrameThread != 1) {
+        printf("Errrrrrrrrror in getThreadLocalStorage %s num is %d\n", info.name, node->popFrameThread);
+      }
     }
     return node;
 }
@@ -262,6 +295,7 @@ findThread(ThreadList *list, jthread thread)
 
     /* Get thread local storage for quick thread -> node access */
     node = getThreadLocalStorage(thread);
+//    node = NULL;
 
     /* In some rare cases we might get NULL, so we check the list manually for
      *   any threads that we could match.
@@ -414,13 +448,30 @@ insertThread(JNIEnv *env, ThreadList *list, jthread thread)
          *   Some threads may not be in a state that allows setting of TLS,
          *   which is ok, see findThread, it deals with threads without TLS set.
          */
+/*
         if (!is_vthread) {
             setThreadLocalStorage(node->thread, (void*)node);
         }
-
+*/
         if (is_vthread) {
             node->isStarted = JNI_TRUE; /* VThreads are considered started by default. */
         }
+
+
+      /* Set the thread name */
+      jvmtiThreadInfo info;
+      jvmtiError error;
+
+      memset(&info, 0, sizeof(info));
+      error = JVMTI_FUNC_PTR(gdata->jvmti,GetThreadInfo)
+          (gdata->jvmti, node->thread, &info);
+      if (info.name != NULL) {
+        printf("Adding node %s with popFrame %d\n", info.name, node->popFrameThread);
+        fflush(0);
+        jvmtiDeallocate(info.name);
+      } else {
+        printf("Adding node NULLLL??????\n");
+      }
     }
 
     return node;
@@ -1314,7 +1365,7 @@ commonResumeList(JNIEnv *env)
         if (node == NULL) {
             EXIT_ERROR(AGENT_ERROR_INVALID_THREAD,"missing entry in running thread table");
         }
-        LOG_MISC(("thread=%p resumed as part of list", node->thread));
+        LOG_MISC(("thread=%p resumed q", node->thread));
 
         /*
          * resumeThreadByNode() assumes that JVM/DI ResumeThread()
@@ -1888,20 +1939,36 @@ static jboolean
 getPopFrameThread(jthread thread)
 {
     jboolean popFrameThread;
+    jvmtiError error = JVMTI_ERROR_NONE;
+    jvmtiThreadInfo info;
 
     debugMonitorEnter(threadLock);
     {
         ThreadNode *node;
 
-        node = findThread(NULL, thread);
+      /* Get thread information */
+      info.name = NULL;
+      error = FUNC_PTR(gdata->jvmti,GetThreadInfo)
+          (gdata->jvmti, thread, &info);
+      if ( error != JVMTI_ERROR_NONE) {
+        EXIT_ERROR(AGENT_ERROR_INTERNAL, "Unexpected NULL");
+      }
+
+      node = findThread(NULL, thread);
         if (node == NULL) {
             popFrameThread = JNI_FALSE;
         } else {
             popFrameThread = node->popFrameThread;
         }
+        CN(node);
     }
     debugMonitorExit(threadLock);
 
+    if (popFrameThread != 0) {
+      printf("getPopFrameThread returning for : %s with as %d\n", info.name, popFrameThread);
+    }
+    fflush(0);
+    jvmtiDeallocate(info.name);
     return popFrameThread;
 }
 
@@ -1911,8 +1978,20 @@ setPopFrameThread(jthread thread, jboolean value)
     debugMonitorEnter(threadLock);
     {
         ThreadNode *node;
+        jvmtiError error = JVMTI_ERROR_NONE;
+        jvmtiThreadInfo info;
 
+        /* Get thread information */
+        info.name = NULL;
+        error = FUNC_PTR(gdata->jvmti,GetThreadInfo)
+            (gdata->jvmti, thread, &info);
+        if ( error != JVMTI_ERROR_NONE) {
+          EXIT_ERROR(AGENT_ERROR_INTERNAL, "Unexpected NULL");
+        }
+        printf("Setting popFrameThread %s to %s\n", info.name, (value == JNI_TRUE) ? "true" : "false");
+        jvmtiDeallocate(info.name);
         node = findThread(NULL, thread);
+        CN(node);
         if (node == NULL) {
             EXIT_ERROR(AGENT_ERROR_NULL_POINTER,"entry in thread table");
         } else {
@@ -1938,6 +2017,7 @@ getPopFrameEvent(jthread thread)
         } else {
             popFrameEvent = node->popFrameEvent;
         }
+        CN(node);
     }
     debugMonitorExit(threadLock);
 
@@ -1958,6 +2038,7 @@ setPopFrameEvent(jthread thread, jboolean value)
             node->popFrameEvent = value;
             node->frameGeneration++; /* Increment on each resume */
         }
+      CN(node);
     }
     debugMonitorExit(threadLock);
 }
@@ -1978,6 +2059,7 @@ getPopFrameProceed(jthread thread)
         } else {
             popFrameProceed = node->popFrameProceed;
         }
+      CN(node);
     }
     debugMonitorExit(threadLock);
 
@@ -1997,6 +2079,7 @@ setPopFrameProceed(jthread thread, jboolean value)
         } else {
             node->popFrameProceed = value;
         }
+      CN(node);
     }
     debugMonitorExit(threadLock);
 }
@@ -2146,9 +2229,41 @@ threadControl_popFrames(jthread thread, FrameNumber fnum)
 static jboolean
 checkForPopFrameEvents(JNIEnv *env, EventIndex ei, jthread thread)
 {
-    if ( getPopFrameThread(thread) ) {
+    jvmtiThreadInfo info;
+    jvmtiError error;
+    jboolean result = getPopFrameThread(thread);
+    memset(&info, 0, sizeof(info));
+    error = JVMTI_FUNC_PTR(gdata->jvmti,GetThreadInfo)
+        (gdata->jvmti, thread, &info);
+    if (error != JVMTI_ERROR_NONE) {
+      printf("AAAAAAA ERRROR\n");
+      EXIT_ERROR(AGENT_ERROR_INTERNAL, "ERROR in  thread start during pop frame");
+    }
+    printf("getPopFrameThread returned for : %s with as %d\n", info.name,  result);
+    if ( result ) {
+      printf("in if returned for : %s with %d as %s\n", info.name, result,  ((result == JNI_TRUE) ? "true" : "false"));
+    } else {
+      printf("in else returned for : %s with %d as %s\n", info.name, result,  ((result == JNI_TRUE) ? "true" : "false"));
+    }
+    if ( result ) {
         switch (ei) {
             case EI_THREAD_START:
+                printf("DUMP EI_THREAD_START \n");
+                if (thread == NULL) {
+                  printf("THREAD NULL\n");
+                  EXIT_ERROR(AGENT_ERROR_INTERNAL, "NULLLL !!!! thread start during pop frame");
+                } else {
+                  jboolean isVirtual = JNI_FUNC_PTR(env, IsVirtualThread)(env, thread);
+                  printf("THREAD %p  %s\n", thread, isVirtual ? "virtual" : "kernel");
+                }
+                if (info.name != NULL) {
+                  printf("THREAD Failed %s\n", info.name);
+                  jvmtiDeallocate(info.name);
+                } else {
+                  printf("THREAD Failed NULL\n");
+                  EXIT_ERROR(AGENT_ERROR_INTERNAL, "NULL INFO in  thread start during pop frame");
+                }
+                fflush(0);
                 /* Excuse me? */
                 EXIT_ERROR(AGENT_ERROR_INTERNAL, "thread start during pop frame");
                 break;

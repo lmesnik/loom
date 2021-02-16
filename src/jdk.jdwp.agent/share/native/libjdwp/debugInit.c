@@ -1268,10 +1268,10 @@ parseOptions(char *options)
     }
 
     /* Setup logging now */
-    if ( logfile!=NULL ) {
+   // if ( logfile!=NULL ) {
         setup_logging(logfile, logflags);
         (void)atexit(&atexit_finish_logging);
-    }
+    //}
 
     if (bagSize(transports) == 0) {
         errmsg = "no transport specified";

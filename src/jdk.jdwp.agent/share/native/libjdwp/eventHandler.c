@@ -374,7 +374,7 @@ skipEventReport(JNIEnv *env, jthread thread, EventIndex ei,
     if (ei == EI_BREAKPOINT) {
         if (threadControl_cmpCLEInfo(env, thread, clazz, method, location)) {
             LOG_MISC(("Co-located breakpoint event found: "
-                "%s,thread=%p,clazz=%p,method=%p,location=%d",
+                "%s,thread=%p,clazz=%p,method=%p,location=%ld",
                 eventText(ei), thread, clazz, method, location));
             skipping = JNI_TRUE;
         }
@@ -411,7 +411,7 @@ reportEvents(JNIEnv *env, jbyte sessionID, jthread thread, EventIndex ei,
     if (thread != NULL &&
            skipEventReport(env, thread, ei, clazz, method, location)) {
         LOG_MISC(("event report being skipped: "
-            "ei=%s,thread=%p,clazz=%p,method=%p,location=%d",
+            "ei=%s,thread=%p,clazz=%p,method=%p,location=%ld",
             eventText(ei), thread, clazz, method, location));
         bagDeleteAll(eventBag);
         return;

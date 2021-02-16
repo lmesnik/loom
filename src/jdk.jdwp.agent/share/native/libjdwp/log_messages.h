@@ -48,13 +48,13 @@ void finish_logging();
     #define LOG_JVMTI(args) \
         (LOG_TEST(JDWP_LOG_JVMTI)?_LOG("JVMTI",args):LOG_NULL)
     #define LOG_MISC(args)  \
-        (LOG_TEST(JDWP_LOG_MISC) ?_LOG("MISC", args):LOG_NULL)
+        printf("MISC: ");  (printf args); printf("\n"); fflush(0);
     #define LOG_STEP(args)  \
-        (LOG_TEST(JDWP_LOG_STEP) ?_LOG("STEP", args):LOG_NULL)
+        printf("STEP: ");  (printf args); printf("\n"); fflush(0);
     #define LOG_LOC(args)   \
-        (LOG_TEST(JDWP_LOG_LOC)  ?_LOG("LOC",  args):LOG_NULL)
+        printf("LOC: ");  (printf args); printf("\n"); fflush(0);
     #define LOG_CB(args) \
-        (LOG_TEST(JDWP_LOG_CB)?_LOG("CB",args):LOG_NULL)
+        printf("CB: ");  (printf args); printf("\n"); fflush(0);
     #define LOG_ERROR(args) \
         (LOG_TEST(JDWP_LOG_ERROR)?_LOG("ERROR",args):LOG_NULL)
 

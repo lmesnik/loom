@@ -140,7 +140,7 @@ createNode(JNIEnv *env, jobject ref)
 static void
 deleteNode(JNIEnv *env, RefNode *node)
 {
-    LOG_MISC(("Freeing %d (%x)\n", (int)node->seqNum, node->ref));
+    LOG_MISC(("Freeing %d (%p)\n", (int)node->seqNum, node->ref));
 
     if ( node->ref != NULL ) {
         /* Clear tag */

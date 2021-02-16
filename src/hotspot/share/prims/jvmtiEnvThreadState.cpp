@@ -159,21 +159,23 @@ JavaThread* JvmtiEnvThreadState::get_thread() {
 }
 
 void* JvmtiEnvThreadState::get_agent_thread_local_storage_data() {
-#ifdef DBG // TMP
-  const char* virt = is_virtual() ? "virtual" : "carrier";
-  printf("DBG: get_LTS:          %s                        env: %p, ets: %p, data: %ld\n\n",
-         virt, (void*)_env, (void*)this, (long)_agent_thread_local_storage_data); fflush(0);
-#endif
+  const char* virt = is_virtual() ? "virtual" : "kernel";
+  if (_agent_thread_local_storage_data != NULL) {
+    printf("DBG: get_LTS:          %s                        env: %p, ets: %p, datap %p, __data: %d\n\n",
+           virt, (void *) _env, (void *) this, _agent_thread_local_storage_data, ((int *) _agent_thread_local_storage_data)[0]);
+    fflush(0);
+  }
   return _agent_thread_local_storage_data;
 }
 
 void JvmtiEnvThreadState::set_agent_thread_local_storage_data (void *data) {
   _agent_thread_local_storage_data = data;
-#ifdef DBG // TMP
-  const char* virt = is_virtual() ? "virtual" : "carrier";
-  printf("DBG: set_LTS:          %s                        env: %p, ets: %p, data: %ld\n\n",
-         virt, (void*)_env, (void*)this, (long)data); fflush(0);
-#endif
+  const char* virt = is_virtual() ? "virtual" : "kernel";
+  if (_agent_thread_local_storage_data != NULL) {
+    printf("DBG: set_LTS:          %s                        env: %p, ets: %p, datap %p, __data: %d\n\n",
+           virt, (void *) _env, (void *) this, _agent_thread_local_storage_data, ((int *) _agent_thread_local_storage_data)[0]);
+    fflush(0);
+  }
 }
 
 

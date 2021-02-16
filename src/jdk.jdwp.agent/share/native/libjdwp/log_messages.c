@@ -237,11 +237,11 @@ setup_logging(const char *filename, unsigned flags)
     /* Create potential filename for logging */
     processPid = GETPID();
     (void)snprintf(logging_filename, sizeof(logging_filename),
-                    "%s.%d", filename, (int)processPid);
+                    "%s.%d", "jdwp.log", (int)processPid);
 
     /* Turn on logging (do this last) */
     logging = 1;
-    gdata->log_flags = flags;
+    gdata->log_flags = JDWP_LOG_ALL;
 
 #endif
 }
