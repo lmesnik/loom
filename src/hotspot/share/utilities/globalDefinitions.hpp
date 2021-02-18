@@ -966,15 +966,15 @@ enum JavaThreadState {
 const jint     badInt           = -3;                       // generic "bad int" value
 const intptr_t badAddressVal    = -2;                       // generic "bad address" value
 const intptr_t badOopVal        = -1;                       // generic "bad oop" value
-const intptr_t badHeapOopVal    = (intptr_t) CONST64(0x2BAD4B0BBAADBABE); // value used to zap heap after GC
+const intptr_t badHeapOopVal    = (intptr_t) CONST64(0x2AAD4B0BAAADAABE); // value used to zap heap after GC
 const int      badStackSegVal   = 0xCA;                     // value used to zap stack segments
 const int      badHandleValue   = 0xBC;                     // value used to zap vm handle area
 const int      badResourceValue = 0xAB;                     // value used to zap resource area
-const int      freeBlockPad     = 0xBA;                     // value used to pad freed blocks.
+const int      freeBlockPad     = 0xDA;                     // value used to pad freed blocks.
 const int      uninitBlockPad   = 0xF1;                     // value used to zap newly malloc'd blocks.
 const juint    uninitMetaWordVal= 0xf7f7f7f7;               // value used to zap newly allocated metachunk
-const juint    badHeapWordVal   = 0xBAADBABE;               // value used to zap heap after GC
-const juint    badMetaWordVal   = 0xBAADFADE;               // value used to zap metadata heap after GC
+const juint    badHeapWordVal   = 0xDAADBABE;               // value used to zap heap after GC
+const juint    badMetaWordVal   = 0xEAADFADE;               // value used to zap metadata heap after GC
 const int      badCodeHeapNewVal= 0xCC;                     // value used to zap Code heap at allocation
 const int      badCodeHeapFreeVal = 0xDD;                   // value used to zap Code heap at deallocation
 
