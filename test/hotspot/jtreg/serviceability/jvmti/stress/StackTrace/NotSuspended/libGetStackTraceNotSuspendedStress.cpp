@@ -43,21 +43,20 @@ static void test_stack_trace(jvmtiEnv *jvmti, JNIEnv *jni, jthread vthread) {
     printf("Stacktrace in virtual thread is incorrect.\n");
     print_thread_info(jni, jvmti, vthread);
     print_stack_trace_frames(jvmti, jni, count, frames);
-    //fatal(jni, "Incorrect frame count.");
+    fatal(jni, "Incorrect frame count.");
   }
-  print_stack_trace_frames(jvmti, jni, count, frames);
 
   method = frames[count -1].method;
 
-  const char* class_name = get_method_class_name(jvmti, jni, method);
+  //const char* class_name = get_method_class_name(jvmti, jni, method);
   const char* method_name = get_method_name(jvmti, jni, method);
-/*
-  if (strcmp(CONTINUATION_CLASS_NAME, class_name) !=0 || strcmp(CONTINUATION_METHOD_NAME, method_name) != 0) {
+
+  if (strcmp(CONTINUATION_METHOD_NAME, method_name) != 0) {
     printf("Stacktrace in virtual thread is incorrect (doesn't start from enter(...):");
     print_stack_trace_frames(jvmti, jni, count, frames);
     fatal(jni, "incorrect stacktrace.");
   }
-*/
+
 }
 
 
@@ -84,9 +83,9 @@ agentProc(jvmtiEnv * jvmti, JNIEnv * jni, void * arg) {
     }
     check_jvmti_status(jni, err,  "Error in GetAllThreads\n");
     for (int i = 0; i < count; i++) {
-      jthread testedThread = NULL;
+      jthread tested_thread = NULL;
 
-      err = jvmti->GetVirtualThread(threads[i], &testedThread);
+      err = jvmti->GetVirtualThread(threads[i], &tested_thread);
       if (err == JVMTI_ERROR_THREAD_NOT_ALIVE) {
         continue;
       }
@@ -94,8 +93,9 @@ agentProc(jvmtiEnv * jvmti, JNIEnv * jni, void * arg) {
         return;
       }
       check_jvmti_status(jni, err,  "Error in GetVirtualThread\n");
-      if (testedThread != NULL) {
-        test_stack_trace(jvmti, jni, threads[i]);
+      if (tested_thread != NULL) {
+        test_stack_trace(jvmti, jni, tested_thread);
+        //test_stack_trace(jvmti, jni, threads[i]);
       }
 
     }
