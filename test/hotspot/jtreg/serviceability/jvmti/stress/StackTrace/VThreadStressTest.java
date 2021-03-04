@@ -23,9 +23,8 @@
 
 /**
  * @test
- * @summary Verifies JVMTI GetStackTrace functions called after vthread is suspended.
- * @library /test/lib
- * @run main/othervm/native -agentlib:GetStackTraceSuspendedStress GetStackTraceSuspendedStressTest
+ * @summary Verifies JVMTI support for VThreads.
+ * @run main/othervm/native -agentlib:VThreadStress VThreadStressTest
  */
 
 import jdk.test.lib.jvmti.DebugeeClass;
@@ -34,8 +33,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.*;
 
-public class GetStackTraceSuspendedStressTest extends DebugeeClass {
-    private static final String agentLib = "GetStackTraceSuspendedStress";
+public class VThreadStressTest extends DebugeeClass {
+    private static final String agentLib = "VThreadStress";
 
     static final int MSG_COUNT = 1000;
     static final SynchronousQueue<String> QUEUE = new SynchronousQueue<>();
@@ -96,12 +95,7 @@ public class GetStackTraceSuspendedStressTest extends DebugeeClass {
             throw ex;
         }
 
-        Thread t = Thread.startVirtualThread("virtual-thread", () -> {
-
-        });
-        t.join();
-
-        GetStackTraceSuspendedStressTest obj = new GetStackTraceSuspendedStressTest();
+        VThreadStressTest obj = new VThreadStressTest();
         obj.runTest();
     }
 }

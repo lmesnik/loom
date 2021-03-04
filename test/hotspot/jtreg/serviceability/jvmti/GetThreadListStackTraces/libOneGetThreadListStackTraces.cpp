@@ -27,6 +27,9 @@
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
+#include "jvmti_common.h"
 
 #define MAX_FRAMES 100
 #define ERR_MSG_LEN 1024
@@ -38,7 +41,29 @@ extern "C" {
 static jvmtiEnv *jvmti = NULL;
 
 JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *jvm, char *options, void *reserved) {
-  return jvm->GetEnv(reinterpret_cast<void**>(&jvmti), JVMTI_VERSION_11);
+  jint res = jvm->GetEnv(reinterpret_cast<void**>(&jvmti), JVMTI_VERSION_11);
+  jvmtiCapabilities caps;
+  jvmtiError err;
+
+  memset(&caps, 0, sizeof(jvmtiCapabilities));
+  caps.can_support_virtual_threads = 1;
+
+  err = jvmti->AddCapabilities(&caps);
+  if (err != JVMTI_ERROR_NONE) {
+    return JNI_ERR;
+  }
+
+  err = jvmti->GetCapabilities(&caps);
+  if (err != JVMTI_ERROR_NONE) {
+    return JNI_ERR;
+  }
+
+  if (!caps.can_support_virtual_threads) {
+    printf("ERROR: virtual thread support is not implemented.\n");
+    return JNI_ERR;
+  }
+
+  return res;
 }
 
 static void check_frame_info(JNIEnv *env, jvmtiFrameInfo *fi1, jvmtiFrameInfo *fi2) {
@@ -87,7 +112,7 @@ static void check_stack_info(JNIEnv *env, jvmtiStackInfo *si1, jvmtiStackInfo *s
   }
 }
 
-JNIEXPORT void JNICALL Java_OneGetThreadListStackTraces_checkCallStacks(JNIEnv *env, jclass cls, jthread thread) {
+JNIEXPORT void JNICALL Java_OneGetThreadListStackTraces_checkCallStacks(JNIEnv *env, jclass cls, jthread thread, jboolean is_virtual) {
   jvmtiStackInfo *stack_info, *target_info, *target_one_info;
   jvmtiError result;
   char err_msg[ERR_MSG_LEN] = {0};
@@ -105,6 +130,8 @@ JNIEXPORT void JNICALL Java_OneGetThreadListStackTraces_checkCallStacks(JNIEnv *
   jboolean is_same;
   target_info = NULL;
   for (jint i = 0; i < num_threads; i++) {
+    print_thread_info(jvmti, env, stack_info[i].thread);
+    print_stack_trace(jvmti, env, stack_info[i].thread);
     is_same = env->IsSameObject(stack_info[i].thread, thread);
     if (env->ExceptionOccurred()) {
       env->ExceptionDescribe();

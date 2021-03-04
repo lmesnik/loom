@@ -34,10 +34,16 @@
 
 public class OneGetThreadListStackTraces {
 
-    private static native void checkCallStacks(Thread thread);
+    private static native void checkCallStacks(Thread thread, boolean isVirtual);
 
     public static void main(String[] args) throws Exception {
         /* Check call stack native */
-        checkCallStacks(Thread.currentThread());
+        checkCallStacks(Thread.currentThread(), false);
+
+        Thread t = Thread.startVirtualThread("virtual-thread", () -> {
+                checkCallStacks(Thread.currentThread(), true);
+            });
+        t.join();
+
     }
 }

@@ -39,24 +39,73 @@ static void test_stack_trace(jvmtiEnv *jvmti, JNIEnv *jni, jthread vthread) {
 
   err = jvmti->GetStackTrace(vthread, 0, MAX_FRAME_COUNT, frames, &count);
   check_jvmti_status(jni, err, "GetStackTrace returns error.");
-  if (count < 0) {
+  if (count <= 0) {
     printf("Stacktrace in virtual thread is incorrect.\n");
     print_thread_info(jvmti, jni, vthread);
     print_stack_trace_frames(jvmti, jni, count, frames);
-    fatal(jni, "Incorrect frame count.");
+    //fatal(jni, "Incorrect frame count.");
   }
-
   method = frames[count -1].method;
-
   const char* class_name = get_method_class_name(jvmti, jni, method);
   const char* method_name = get_method_name(jvmti, jni, method);
 
   if (strcmp(CONTINUATION_CLASS_NAME, class_name) !=0 || strcmp(CONTINUATION_METHOD_NAME, method_name) != 0) {
-    printf("Stacktrace in virtual thread is incorrect (doesn't start from enter(...):\n");
+    printf("Stacktrace in virtual thread is incorrect (doesn't start from enter(...):");
     print_stack_trace_frames(jvmti, jni, count, frames);
     fatal(jni, "incorrect stacktrace.");
   }
 
+  /*
+  jint frame_count = -1;
+  check_jvmti_status(jni, jvmti->GetFrameCount(vthread, &frame_count), "GetFrameCount failed.");
+  if (frame_count != count) {
+    printf("Incorrect frame count %d while %d expected.", frame_count, count);
+    print_stack_trace_frames(jvmti, jni, count, frames);
+    fatal(jni, "Incorrect frame count.");
+  }
+*/
+}
+
+void check_link_consistency(jvmtiEnv *jvmti, JNIEnv *jni, jthread vthread) {
+  jthread cthread = NULL;
+  jvmtiError err;
+
+  printf("check_vthread_consistency. "); print_thread_info(jvmti, jni, vthread);
+  fflush(0);
+
+  err = jvmti->GetCarrierThread(vthread, &cthread);
+  check_jvmti_status(jni, err, "Error in GetCarrierThread.");
+
+  if (cthread != NULL) {
+    jthread cthread_to_vthread = NULL;
+    err = jvmti->GetVirtualThread(cthread, &cthread_to_vthread);
+    if (err != JVMTI_ERROR_NONE) {
+      printf("Error %s in GetVirtualThread :\n", TranslateError(err));
+      print_thread_info(jvmti, jni, vthread);
+      print_thread_info(jvmti, jni, cthread);
+      fatal(jni, "");
+    }
+    if (!jni->IsSameObject(vthread, cthread_to_vthread)) {
+      printf("GetVirtualThread(GetCarrierThread(vthread)) not equals to vthread.\n");
+      printf("Result: ");
+      print_thread_info(jvmti, jni, cthread_to_vthread);
+      printf("Expected: ");
+      print_thread_info(jvmti, jni, vthread);
+      printf("Carrier: ");
+      print_thread_info(jvmti, jni, cthread);
+      // fatal(jni, "GetVirtualThread(GetCarrierThread(vthread)) not equals to vthread.");
+    }
+  }
+}
+
+static void check_vthread_consistency(jvmtiEnv *jvmti, JNIEnv *jni, jthread vthread) {
+  check_link_consistency(jvmti, jni, vthread);
+  test_stack_trace(jvmti, jni, vthread);
+}
+
+static void check_vthread_consistency_suspended(jvmtiEnv *jvmti, JNIEnv *jni, jthread vthread) {
+check_link_consistency(jvmti, jni, vthread);
+test_stack_trace(jvmti, jni, vthread);
 }
 
 
@@ -77,23 +126,15 @@ agentProc(jvmtiEnv * jvmti, JNIEnv * jni, void * arg) {
     jint count = 0;
     jvmtiError err;
 
-    jvmtiStackInfo *stack_info, *target_info, *target_one_info;
-    jint num_threads;
-    err = jvmti->GetAllStackTraces(40, &stack_info, &num_threads);
-    for (jint i = 0; i < num_threads; i++) {
-      print_thread_info(jvmti, jni, stack_info[i].thread);
-      print_stack_trace(jvmti, jni, stack_info[i].thread);
-    }
-/*
     err = jvmti->GetAllThreads(&count, &threads);
     if (err == JVMTI_ERROR_WRONG_PHASE) {
       return;
     }
     check_jvmti_status(jni, err,  "Error in GetAllThreads\n");
     for (int i = 0; i < count; i++) {
-      jthread tested_thread = NULL;
+      jthread testedThread = NULL;
 
-      err = jvmti->GetVirtualThread(threads[i], &tested_thread);
+      err = jvmti->GetVirtualThread(threads[i], &testedThread);
       if (err == JVMTI_ERROR_THREAD_NOT_ALIVE) {
         continue;
       }
@@ -101,14 +142,15 @@ agentProc(jvmtiEnv * jvmti, JNIEnv * jni, void * arg) {
         return;
       }
       check_jvmti_status(jni, err,  "Error in GetVirtualThread\n");
-      if (tested_thread != NULL) {
-        test_stack_trace(jvmti, jni, tested_thread);
-        //test_stack_trace(jvmti, jni, threads[i]);
+      if (testedThread != NULL) {
+        check_vthread_consistency(jvmti, jni, testedThread);
+        check_jvmti_status(jni, jvmti->SuspendThread(testedThread), "Error in SuspendThread");
+        check_vthread_consistency_suspended(jvmti, jni, testedThread);
+        check_jvmti_status(jni, jvmti->ResumeThread(testedThread), "Error in ResumeThread");
       }
 
     }
     check_jvmti_status(jni, jvmti->Deallocate((unsigned char *) threads), "Error Deallocating memory.");
-    */
   }
 }
 
@@ -125,6 +167,7 @@ extern JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *jvm, char *options, void *res
 
   memset(&caps, 0, sizeof(caps));
   caps.can_support_virtual_threads = 1;
+  caps.can_suspend = 1;
 
   err = jvmti->AddCapabilities(&caps);
   if (err != JVMTI_ERROR_NONE) {
