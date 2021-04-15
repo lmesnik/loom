@@ -213,6 +213,14 @@ print_stack_trace_frames(jvmtiEnv *jvmti, JNIEnv *jni, jint count, jvmtiFrameInf
   printf("\n");
 }
 
+static jint
+get_frame_count(jvmtiEnv *jvmti, JNIEnv* jni, jthread thread) {
+  jint frame_count;
+  jvmtiError err = jvmti->GetFrameCount(thread, &frame_count);
+  check_jvmti_status(jni, err, "get_frame_count: error in JVMTI GetFrameCount call");
+  return frame_count;
+}
+
 static char*
 get_thread_name(jvmtiEnv *jvmti, JNIEnv* jni, jthread thread) {
   jvmtiThreadInfo thr_info;
@@ -328,6 +336,23 @@ print_stack_trace(jvmtiEnv *jvmti, JNIEnv* jni, jthread thread) {
   deallocate(jvmti, jni, (void*)tname);
   printf("\n");
 }
+
+
+static void suspend_thread(jvmtiEnv *jvmti, JNIEnv* jni, jthread thread) {
+  check_jvmti_status(jni, jvmti->SuspendThread(thread), "error in JVMTI SuspendThread");
+}
+
+static void resume_thread(jvmtiEnv *jvmti, JNIEnv* jni, jthread thread) {
+  check_jvmti_status(jni, jvmti->ResumeThread(thread), "error in JVMTI ResumeThread");
+}
+
+static jthread get_current_thread(jvmtiEnv *jvmti, JNIEnv* jni) {
+  jthread thread;
+  check_jvmti_status(jni, jvmti->GetCurrentThread(&thread), "error in JVMTI ResumeThread");
+  return thread;
+}
+
+
 
 
 /* Commonly used helper functions */
