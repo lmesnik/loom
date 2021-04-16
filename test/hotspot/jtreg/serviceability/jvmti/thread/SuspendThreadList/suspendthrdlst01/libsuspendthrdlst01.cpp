@@ -43,8 +43,8 @@ static int threads_count = 0;
 
 /* ============================================================================= */
 
-static int fillThreadsByName(jvmtiEnv *jvmti, JNIEnv *jni,
-                             const char name[], int foundCount, jthread foundThreads[]);
+static int find_threads_by_name(jvmtiEnv *jvmti, JNIEnv *jni,
+                             const char name[], int found_count, jthread found_threads[]);
 
 /** Agent algorithm. */
 static void JNICALL
@@ -72,7 +72,7 @@ agentProc(jvmtiEnv *jvmti, JNIEnv *jni, void *arg) {
     printf("  ... allocated array: %p\n", (void *) threads);
 
     printf("Find threads: %d threads\n", threads_count);
-    if (fillThreadsByName(jvmti, jni, THREAD_NAME, threads_count, threads) == 0) {
+    if (find_threads_by_name(jvmti, jni, THREAD_NAME, threads_count, threads) == 0) {
       return;
     }
 
@@ -106,7 +106,7 @@ agentProc(jvmtiEnv *jvmti, JNIEnv *jni, void *arg) {
                    TranslateState(state), (int) state);
 
       if ((state & JVMTI_THREAD_STATE_SUSPENDED) == 0) {
-        NSK_COMPLAIN3("SuspendThreadList() does not turn on flag SUSPENDED for thread #%i:\n"
+        printf("SuspendThreadList() does not turn on flag SUSPENDED for thread #%i:\n"
                       "#   state: %s (%d)\n",
                       i, TranslateState(state), (int) state);
         nsk_jvmti_setFailStatus();
@@ -145,16 +145,15 @@ agentProc(jvmtiEnv *jvmti, JNIEnv *jni, void *arg) {
 /* ============================================================================= */
 
 /** Find threads whose name starts with specified name prefix. */
-static int fillThreadsByName(jvmtiEnv *jvmti, JNIEnv *jni,
-                             const char name[], int foundCount, jthread foundThreads[]) {
+static int find_threads_by_name(jvmtiEnv *jvmti, JNIEnv *jni, const char *name, int found_count, jthread *found_threads) {
   jint count = 0;
   jthread *threads = NULL;
 
   size_t len = strlen(name);
   int found = 0;
 
-  for (int i = 0; i < foundCount; i++) {
-    foundThreads[i] = NULL;
+  for (int i = 0; i < found_count; i++) {
+    found_threads[i] = NULL;
   }
 
   check_jvmti_status(jni, jvmti->GetAllThreads(&count, &threads), "Error in GetAllThreads");
@@ -168,8 +167,8 @@ static int fillThreadsByName(jvmtiEnv *jvmti, JNIEnv *jni,
     if (info.name != NULL && strncmp(name, info.name, len) == 0) {
       NSK_DISPLAY3("  ... found thread #%d: %p (%s)\n",
                    found, threads[i], info.name);
-      if (found < foundCount)
-        foundThreads[found] = threads[i];
+      if (found < found_count)
+        found_threads[found] = threads[i];
       found++;
     }
 
@@ -177,24 +176,24 @@ static int fillThreadsByName(jvmtiEnv *jvmti, JNIEnv *jni,
 
   check_jvmti_status(jni, jvmti->Deallocate((unsigned char *) threads), "");
 
-  if (found != foundCount) {
-    NSK_COMPLAIN3("Unexpected number of tested threads found:\n"
+  if (found != found_count) {
+    printf("Unexpected number of tested threads found:\n"
                   "#   name:     %s\n"
                   "#   found:    %d\n"
                   "#   expected: %d\n",
-                  name, found, foundCount);
+           name, found, found_count);
     nsk_jvmti_setFailStatus();
     return NSK_FALSE;
   }
 
-  printf("Make global references for threads: %d threads\n", foundCount);
-  for (int i = 0; i < foundCount; i++) {
-    foundThreads[i] = (jthread) jni->NewGlobalRef(foundThreads[i]);
-    if (foundThreads[i] == NULL) {
+  printf("Make global references for threads: %d threads\n", found_count);
+  for (int i = 0; i < found_count; i++) {
+    found_threads[i] = (jthread) jni->NewGlobalRef(found_threads[i]);
+    if (found_threads[i] == NULL) {
       nsk_jvmti_setFailStatus();
       return NSK_FALSE;
     }
-    printf("  ... thread #%d: %p\n", i, foundThreads[i]);
+    printf("  ... thread #%d: %p\n", i, found_threads[i]);
   }
 
   return NSK_TRUE;

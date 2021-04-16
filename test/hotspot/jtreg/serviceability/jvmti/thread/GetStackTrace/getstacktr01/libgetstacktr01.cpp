@@ -28,133 +28,120 @@
 
 extern "C" {
 
-
 #define PASSED 0
 #define STATUS_FAILED 2
 
 typedef struct {
-    const char *cls;
-    const char *name;
-    const char *sig;
+  const char *cls;
+  const char *name;
+  const char *sig;
 } frame_info;
 
 static jvmtiEnv *jvmti = NULL;
 static jint result = PASSED;
-static jboolean printdump = JNI_FALSE;
 static frame_info frames[] = {
-    { "Lgetstacktr01;", "check", "(Ljava/lang/Thread;)V" },
-    { "Lgetstacktr01;", "dummy", "()V" },
-    { "Lgetstacktr01;", "chain", "()I" },
-    { "Lgetstacktr01;", "run", "([Ljava/lang/String;Ljava/io/PrintStream;)I" },
-    { "Lgetstacktr01;", "main", "([Ljava/lang/String;)V" }
+    {"Lgetstacktr01;", "check", "(Ljava/lang/Thread;)V"},
+    {"Lgetstacktr01;", "dummy", "()V"},
+    {"Lgetstacktr01;", "chain", "()I"},
+    {"Lgetstacktr01;", "run", "([Ljava/lang/String;Ljava/io/PrintStream;)I"},
+    {"Lgetstacktr01;", "main", "([Ljava/lang/String;)V"}
 };
 
 #define NUMBER_OF_STACK_FRAMES ((int) (sizeof(frames)/sizeof(frame_info)))
 
 jint Agent_OnLoad(JavaVM *jvm, char *options, void *reserved) {
-    jint res;
+  jint res = jvm->GetEnv((void **) &jvmti, JVMTI_VERSION_1_1);
+  if (res != JNI_OK || jvmti == NULL) {
+    printf("Wrong result of a valid call to GetEnv!\n");
+    return JNI_ERR;
+  }
 
-    if (options != NULL && strcmp(options, "printduemp") == 0) {
-        printdump = JNI_TRUE;
-    }
-
-    res = jvm->GetEnv((void **) &jvmti, JVMTI_VERSION_1_1);
-    if (res != JNI_OK || jvmti == NULL) {
-        printf("Wrong result of a valid call to GetEnv!\n");
-        return JNI_ERR;
-    }
-
-    return JNI_OK;
+  return JNI_OK;
 }
 
 JNIEXPORT jint JNICALL
 Java_getstacktr01_chain(JNIEnv *env, jclass cls) {
-    jmethodID mid;
-
-    mid = env->GetStaticMethodID(cls, "dummy", "()V");
-    env->CallStaticVoidMethod(cls, mid);
-
-    return result;
+  jmethodID mid = env->GetStaticMethodID(cls, "dummy", "()V");
+  env->CallStaticVoidMethod(cls, mid);
+  return result;
 }
 
 JNIEXPORT void JNICALL
 Java_getstacktr01_check(JNIEnv *env, jclass cls, jthread thread) {
-    jvmtiError err;
-    jvmtiFrameInfo f[NUMBER_OF_STACK_FRAMES];
-    jclass callerClass;
-    char *sigClass, *name, *sig, *generic;
-    jint i, count;
+  jvmtiError err;
+  jvmtiFrameInfo f[NUMBER_OF_STACK_FRAMES];
+  jclass callerClass;
+  char *sigClass, *name, *sig, *generic;
+  jint i, count;
 
-    if (jvmti == NULL) {
-        printf("JVMTI client was not properly loaded!\n");
-        result = STATUS_FAILED;
-        return;
-    }
+  if (jvmti == NULL) {
+    printf("JVMTI client was not properly loaded!\n");
+    result = STATUS_FAILED;
+    return;
+  }
 
-    err = jvmti->GetStackTrace(thread, 0,
-        NUMBER_OF_STACK_FRAMES, f, &count);
+  err = jvmti->GetStackTrace(thread, 0,
+                             NUMBER_OF_STACK_FRAMES, f, &count);
+  if (err != JVMTI_ERROR_NONE) {
+    printf("(GetStackTrace) unexpected error: %s (%d)\n",
+           TranslateError(err), err);
+    result = STATUS_FAILED;
+    return;
+  }
+  if (count != NUMBER_OF_STACK_FRAMES) {
+    printf("Wrong number of frames: %d, expected: %d\n",
+           count, NUMBER_OF_STACK_FRAMES);
+    print_stack_trace(jvmti, env, thread);
+    result = STATUS_FAILED;
+  }
+  for (i = 0; i < count; i++) {
+    printf(">>> checking frame#%d ...\n", i);
+
+    err = jvmti->GetMethodDeclaringClass(
+        f[i].method, &callerClass);
     if (err != JVMTI_ERROR_NONE) {
-        printf("(GetStackTrace) unexpected error: %s (%d)\n",
-               TranslateError(err), err);
+      printf("(GetMethodDeclaringClass#%d) unexpected error: %s (%d)\n",
+             i, TranslateError(err), err);
+      result = STATUS_FAILED;
+      continue;
+    }
+    err = jvmti->GetClassSignature(callerClass,
+                                   &sigClass, &generic);
+    if (err != JVMTI_ERROR_NONE) {
+      printf("(GetClassSignature#%d) unexpected error: %s (%d)\n",
+             i, TranslateError(err), err);
+      result = STATUS_FAILED;
+      continue;
+    }
+    err = jvmti->GetMethodName(f[i].method, &name, &sig, &generic);
+    if (err != JVMTI_ERROR_NONE) {
+      printf("(GetMethodName#%d) unexpected error: %s (%d)\n",
+             i, TranslateError(err), err);
+      result = STATUS_FAILED;
+      continue;
+    }
+    printf(">>>   class:  \"%s\"\n", sigClass);
+    printf(">>>   method: \"%s%s\"\n", name, sig);
+    printf(">>>   %d ... done\n", i);
+
+    if (i < NUMBER_OF_STACK_FRAMES) {
+      if (sigClass == NULL || strcmp(sigClass, frames[i].cls) != 0) {
+        printf("(frame#%d) wrong class sig: \"%s\", expected: \"%s\"\n",
+               i, sigClass, frames[i].cls);
         result = STATUS_FAILED;
-        return;
-    }
-    if (count != NUMBER_OF_STACK_FRAMES) {
-        printf("Wrong number of frames: %d, expected: %d\n",
-               count, NUMBER_OF_STACK_FRAMES);
-        print_stack_trace(jvmti, env, thread);
+      }
+      if (name == NULL || strcmp(name, frames[i].name) != 0) {
+        printf("(frame#%d) wrong method name: \"%s\", expected: \"%s\"\n",
+               i, name, frames[i].name);
         result = STATUS_FAILED;
+      }
+      if (sig == NULL || strcmp(sig, frames[i].sig) != 0) {
+        printf("(frame#%d) wrong method sig: \"%s\", expected: \"%s\"\n",
+               i, sig, frames[i].sig);
+        result = STATUS_FAILED;
+      }
     }
-    for (i = 0; i < count; i++) {
-        if (printdump == JNI_TRUE) {
-            printf(">>> checking frame#%d ...\n", i);
-        }
-        err = jvmti->GetMethodDeclaringClass(
-            f[i].method, &callerClass);
-        if (err != JVMTI_ERROR_NONE) {
-            printf("(GetMethodDeclaringClass#%d) unexpected error: %s (%d)\n",
-                   i, TranslateError(err), err);
-            result = STATUS_FAILED;
-            continue;
-        }
-        err = jvmti->GetClassSignature(callerClass,
-            &sigClass, &generic);
-        if (err != JVMTI_ERROR_NONE) {
-            printf("(GetClassSignature#%d) unexpected error: %s (%d)\n",
-                   i, TranslateError(err), err);
-            result = STATUS_FAILED;
-            continue;
-        }
-        err = jvmti->GetMethodName(f[i].method, &name, &sig, &generic);
-        if (err != JVMTI_ERROR_NONE) {
-            printf("(GetMethodName#%d) unexpected error: %s (%d)\n",
-                   i, TranslateError(err), err);
-            result = STATUS_FAILED;
-            continue;
-        }
-        if (printdump == JNI_TRUE) {
-            printf(">>>   class:  \"%s\"\n", sigClass);
-            printf(">>>   method: \"%s%s\"\n", name, sig);
-            printf(">>>   %d ... done\n", i);
-        }
-        if (i < NUMBER_OF_STACK_FRAMES) {
-            if (sigClass == NULL || strcmp(sigClass, frames[i].cls) != 0) {
-                printf("(frame#%d) wrong class sig: \"%s\", expected: \"%s\"\n",
-                       i, sigClass, frames[i].cls);
-                result = STATUS_FAILED;
-            }
-            if (name == NULL || strcmp(name, frames[i].name) != 0) {
-                printf("(frame#%d) wrong method name: \"%s\", expected: \"%s\"\n",
-                       i, name, frames[i].name);
-                result = STATUS_FAILED;
-            }
-            if (sig == NULL || strcmp(sig, frames[i].sig) != 0) {
-                printf("(frame#%d) wrong method sig: \"%s\", expected: \"%s\"\n",
-                       i, sig, frames[i].sig);
-                result = STATUS_FAILED;
-            }
-        }
-    }
+  }
 }
 
 }
