@@ -38,16 +38,23 @@ typedef struct {
 } frame_info;
 
 static jvmtiEnv *jvmti = NULL;
-static jint result = PASSED;
-static frame_info frames[] = {
+static frame_info expected_virtual_frames[] = {
     {"Lgetstacktr01;", "check", "(Ljava/lang/Thread;)V"},
     {"Lgetstacktr01;", "dummy", "()V"},
-    {"Lgetstacktr01;", "chain", "()I"},
-    {"Lgetstacktr01;", "run", "([Ljava/lang/String;Ljava/io/PrintStream;)I"},
-    {"Lgetstacktr01;", "main", "([Ljava/lang/String;)V"}
+    {"Lgetstacktr01;", "chain", "()V"},
+    {"LTask;", "run", "()V"},
+    {"Ljava/lang/VirtualThread;", "run", "(Ljava/lang/Runnable;)V"}
 };
 
-#define NUMBER_OF_STACK_FRAMES ((int) (sizeof(frames)/sizeof(frame_info)))
+static frame_info expected_platform_frames[] = {
+    {"Lgetstacktr01;", "check", "(Ljava/lang/Thread;)V"},
+    {"Lgetstacktr01;", "dummy", "()V"},
+    {"Lgetstacktr01;", "chain", "()V"},
+    {"LTask;", "run", "()V"},
+    {"Ljava/lang/Thread;", "run", "()V"}
+};
+
+constexpr int MAX_NUMBER_OF_STACK_FRAMES = 10;
 
 jint Agent_OnLoad(JavaVM *jvm, char *options, void *reserved) {
   jint res = jvm->GetEnv((void **) &jvmti, JVMTI_VERSION_1_1);
@@ -59,88 +66,64 @@ jint Agent_OnLoad(JavaVM *jvm, char *options, void *reserved) {
   return JNI_OK;
 }
 
-JNIEXPORT jint JNICALL
+JNIEXPORT void JNICALL
 Java_getstacktr01_chain(JNIEnv *env, jclass cls) {
   jmethodID mid = env->GetStaticMethodID(cls, "dummy", "()V");
   env->CallStaticVoidMethod(cls, mid);
-  return result;
 }
 
 JNIEXPORT void JNICALL
-Java_getstacktr01_check(JNIEnv *env, jclass cls, jthread thread) {
-  jvmtiError err;
-  jvmtiFrameInfo f[NUMBER_OF_STACK_FRAMES];
-  jclass callerClass;
-  char *sigClass, *name, *sig, *generic;
-  jint i, count;
+Java_getstacktr01_check(JNIEnv *jni, jclass cls, jthread thread) {
+  jint result = PASSED;
+  jvmtiFrameInfo frames[MAX_NUMBER_OF_STACK_FRAMES];
+  jclass caller_class;
+  char *class_signature, *name, *sig, *generic;
+  jint count;
 
-  if (jvmti == NULL) {
-    printf("JVMTI client was not properly loaded!\n");
+  frame_info *expected_frames = jni->IsVirtualThread(thread)
+      ? expected_virtual_frames
+      : expected_platform_frames;
+  int number_of_stack_frames = jni->IsVirtualThread(thread)
+      ? ((int) (sizeof(expected_virtual_frames)/sizeof(frame_info)))
+      : ((int) (sizeof(expected_platform_frames)/sizeof(frame_info)));
+
+  check_jvmti_status(jni, jvmti->GetStackTrace(thread, 0, number_of_stack_frames, frames, &count),
+                     "GetStackTrace failed.");
+
+  if (count != number_of_stack_frames) {
+    printf("Wrong number of expected_frames: %d, expected: %d\n", count, number_of_stack_frames);
+    print_stack_trace(jvmti, jni, thread);
     result = STATUS_FAILED;
-    return;
   }
 
-  err = jvmti->GetStackTrace(thread, 0,
-                             NUMBER_OF_STACK_FRAMES, f, &count);
-  if (err != JVMTI_ERROR_NONE) {
-    printf("(GetStackTrace) unexpected error: %s (%d)\n",
-           TranslateError(err), err);
-    result = STATUS_FAILED;
-    return;
-  }
-  if (count != NUMBER_OF_STACK_FRAMES) {
-    printf("Wrong number of frames: %d, expected: %d\n",
-           count, NUMBER_OF_STACK_FRAMES);
-    print_stack_trace(jvmti, env, thread);
-    result = STATUS_FAILED;
-  }
-  for (i = 0; i < count; i++) {
+  for (int i = 0; i < count; i++) {
     printf(">>> checking frame#%d ...\n", i);
 
-    err = jvmti->GetMethodDeclaringClass(
-        f[i].method, &callerClass);
-    if (err != JVMTI_ERROR_NONE) {
-      printf("(GetMethodDeclaringClass#%d) unexpected error: %s (%d)\n",
-             i, TranslateError(err), err);
-      result = STATUS_FAILED;
-      continue;
-    }
-    err = jvmti->GetClassSignature(callerClass,
-                                   &sigClass, &generic);
-    if (err != JVMTI_ERROR_NONE) {
-      printf("(GetClassSignature#%d) unexpected error: %s (%d)\n",
-             i, TranslateError(err), err);
-      result = STATUS_FAILED;
-      continue;
-    }
-    err = jvmti->GetMethodName(f[i].method, &name, &sig, &generic);
-    if (err != JVMTI_ERROR_NONE) {
-      printf("(GetMethodName#%d) unexpected error: %s (%d)\n",
-             i, TranslateError(err), err);
-      result = STATUS_FAILED;
-      continue;
-    }
-    printf(">>>   class:  \"%s\"\n", sigClass);
-    printf(">>>   method: \"%s%s\"\n", name, sig);
-    printf(">>>   %d ... done\n", i);
+    check_jvmti_status(jni, jvmti->GetMethodDeclaringClass(frames[i].method, &caller_class), "GetMethodDeclaringClass failed.");
+    check_jvmti_status(jni, jvmti->GetClassSignature(caller_class, &class_signature, &generic), "GetClassSignature");
+    check_jvmti_status(jni, jvmti->GetMethodName(frames[i].method, &name, &sig, &generic), "GetMethodName");
 
-    if (i < NUMBER_OF_STACK_FRAMES) {
-      if (sigClass == NULL || strcmp(sigClass, frames[i].cls) != 0) {
-        printf("(frame#%d) wrong class sig: \"%s\", expected: \"%s\"\n",
-               i, sigClass, frames[i].cls);
+    printf(">>>   class:  '%s'\n", class_signature);
+    printf(">>>   method: '%s%s'\n", name, sig);
+    printf(">>>   %d ... done\n\n", i);
+
+    if (i < number_of_stack_frames) {
+      if (class_signature == NULL || strcmp(class_signature, expected_frames[i].cls) != 0) {
+        printf("(frame#%d) wrong class sig: '%s', expected: '%s'\n", i, class_signature, expected_frames[i].cls);
         result = STATUS_FAILED;
       }
-      if (name == NULL || strcmp(name, frames[i].name) != 0) {
-        printf("(frame#%d) wrong method name: \"%s\", expected: \"%s\"\n",
-               i, name, frames[i].name);
+      if (name == NULL || strcmp(name, expected_frames[i].name) != 0) {
+        printf("(frame#%d) wrong method name: '%s', expected: '%s'\n", i, name, expected_frames[i].name);
         result = STATUS_FAILED;
       }
-      if (sig == NULL || strcmp(sig, frames[i].sig) != 0) {
-        printf("(frame#%d) wrong method sig: \"%s\", expected: \"%s\"\n",
-               i, sig, frames[i].sig);
+      if (sig == NULL || strcmp(sig, expected_frames[i].sig) != 0) {
+        printf("(frame#%d) wrong method sig: '%s', expected: '%s'\n", i, sig, expected_frames[i].sig);
         result = STATUS_FAILED;
       }
     }
+  }
+  if (result == STATUS_FAILED) {
+    jni->FatalError("Stacktrace differs from expected.");
   }
 }
 

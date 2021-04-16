@@ -32,7 +32,9 @@
  *     The test checks the following:
  *       - if function returns the expected frame of a Java method
  *       - if function returns the expected frame of a JNI method
- *       - if function returns the expected number of frames.
+ *       - if function returns the expected number of expected_frames.
+ *     Test verifies stack trace for platform and virtual threads.
+ *     Test doesn't check stacktrace of JDK implementation, only checks 1st JDK frame.
  * COMMENTS
  *     Ported from JVMDI.
  *
@@ -40,37 +42,29 @@
  * @run main/othervm/native -agentlib:getstacktr01 getstacktr01
  */
 
-import java.io.PrintStream;
-
 public class getstacktr01 {
 
-    final static int JCK_STATUS_BASE = 95;
-
     static {
-        try {
-            System.loadLibrary("getstacktr01");
-        } catch (UnsatisfiedLinkError ule) {
-            System.err.println("Could not load getstacktr01 library");
-            System.err.println("java.library.path:"
-                + System.getProperty("java.library.path"));
-            throw ule;
-        }
+        System.loadLibrary("getstacktr01");
     }
 
-    native static int chain();
+    native static void chain();
     native static void check(Thread thread);
 
-    public static void main(String args[]) {
-
-        // produce JCK-like exit status.
-        System.exit(run(args, System.out) + JCK_STATUS_BASE);
-    }
-
-    public static int run(String args[], PrintStream out) {
-        return chain();
+    public static void main(String args[]) throws Exception {
+        Thread.ofPlatform().start(new Task()).join();
+        Thread.ofVirtual().start(new Task()).join();
     }
 
     public static void dummy() {
         check(Thread.currentThread());
+    }
+
+}
+
+class Task implements Runnable {
+    @Override
+    public void run() {
+        getstacktr01.chain();
     }
 }
