@@ -136,11 +136,6 @@ jint Agent_OnLoad(JavaVM *jvm, char *options, void *reserved) {
 JNIEXPORT void JNICALL
 Java_frameloc01_getReady(JNIEnv *env, jclass cls, jclass klass) {
   jvmtiError err;
-
-  if (!caps.can_generate_exception_events) {
-    return;
-  }
-
   mid1 = env->GetMethodID(klass, "meth01", "(I)V");
   if (mid1 == NULL) {
     printf("Cannot get jmethodID for method \"meth01\"\n");
@@ -159,7 +154,6 @@ Java_frameloc01_getReady(JNIEnv *env, jclass cls, jclass klass) {
 
 JNIEXPORT jboolean JNICALL
 Java_frameloc01_checkFrame01(JNIEnv *jni, jclass cls, jthread thr, jclass klass, jboolean mustPass) {
-  jvmtiError err;
   jmethodID mid;
   jboolean isOk = JNI_FALSE;
 
@@ -171,11 +165,6 @@ Java_frameloc01_checkFrame01(JNIEnv *jni, jclass cls, jthread thr, jclass klass,
   }
 
   suspend_thread(jvmti_env, jni, thr);
-  if (err != JVMTI_ERROR_NONE) {
-    printf("(SuspendThread) unexpected error: %s (%d)\n",
-           TranslateError(err), err);
-    result = STATUS_FAILED;
-  }
 
   // This tests the location of a throw/catch statement.
   // The returned location may be either the throw or the catch statement.
