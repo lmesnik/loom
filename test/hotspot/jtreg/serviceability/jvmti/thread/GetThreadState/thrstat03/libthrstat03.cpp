@@ -55,10 +55,8 @@ jint Agent_OnLoad(JavaVM *jvm, char *options, void *reserved) {
 JNIEXPORT jboolean JNICALL
 Java_thrstat03_check(JNIEnv *jni, jclass cls, jthread thread, jint statInd) {
   jboolean result = JNI_TRUE;
-
-  jvmtiError err;
   jrawMonitorID wait_lock;
-  jint thr_state;
+  jint thr_state = 0;
 
   if (jvmti == NULL) {
     printf("JVMTI client was not properly loaded!\n");

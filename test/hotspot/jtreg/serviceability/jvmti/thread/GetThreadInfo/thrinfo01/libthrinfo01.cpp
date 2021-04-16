@@ -65,7 +65,7 @@ jint Agent_OnLoad(JavaVM *jvm, char *options, void *reserved) {
 
 JNIEXPORT jboolean JNICALL Java_thrinfo01_checkInfo0(JNIEnv *jni, jclass cls,
                                                      jthread thread, jthreadGroup thread_group, jint expected_idx) {
-  jint result = JNI_TRUE;
+  jboolean result = JNI_TRUE;
   jvmtiThreadInfo inf;
 
   printf("Checking thread info for\n");
