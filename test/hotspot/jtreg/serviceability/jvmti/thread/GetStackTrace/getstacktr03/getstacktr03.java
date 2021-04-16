@@ -47,14 +47,7 @@ public class getstacktr03 {
     final static int JCK_STATUS_BASE = 95;
 
     static {
-        try {
-            System.loadLibrary("getstacktr03");
-        } catch (UnsatisfiedLinkError ule) {
-            System.err.println("Could not load getstacktr03 library");
-            System.err.println("java.library.path:"
-                    + System.getProperty("java.library.path"));
-            throw ule;
-        }
+        System.loadLibrary("getstacktr03");
     }
 
     native static void chain();

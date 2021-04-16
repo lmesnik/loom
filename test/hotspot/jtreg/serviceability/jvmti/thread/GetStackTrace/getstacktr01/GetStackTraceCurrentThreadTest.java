@@ -39,13 +39,13 @@
  *     Ported from JVMDI.
  *
  * @library /test/lib
- * @run main/othervm/native -agentlib:getstacktr01 getstacktr01
+ * @run main/othervm/native -agentlib:GetStackTraceCurrentThreadTest GetStackTraceCurrentThreadTest
  */
 
-public class getstacktr01 {
+public class GetStackTraceCurrentThreadTest {
 
     static {
-        System.loadLibrary("getstacktr01");
+        System.loadLibrary("GetStackTraceCurrentThreadTest");
     }
 
     native static void chain();
@@ -65,6 +65,6 @@ public class getstacktr01 {
 class Task implements Runnable {
     @Override
     public void run() {
-        getstacktr01.chain();
+        GetStackTraceCurrentThreadTest.chain();
     }
 }

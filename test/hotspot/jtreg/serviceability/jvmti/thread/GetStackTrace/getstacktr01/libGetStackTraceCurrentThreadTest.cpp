@@ -39,17 +39,17 @@ typedef struct {
 
 static jvmtiEnv *jvmti = NULL;
 static frame_info expected_virtual_frames[] = {
-    {"Lgetstacktr01;", "check", "(Ljava/lang/Thread;)V"},
-    {"Lgetstacktr01;", "dummy", "()V"},
-    {"Lgetstacktr01;", "chain", "()V"},
+    {"LGetStackTraceCurrentThreadTest;", "check", "(Ljava/lang/Thread;)V"},
+    {"LGetStackTraceCurrentThreadTest;", "dummy", "()V"},
+    {"LGetStackTraceCurrentThreadTest;", "chain", "()V"},
     {"LTask;", "run", "()V"},
     {"Ljava/lang/VirtualThread;", "run", "(Ljava/lang/Runnable;)V"}
 };
 
 static frame_info expected_platform_frames[] = {
-    {"Lgetstacktr01;", "check", "(Ljava/lang/Thread;)V"},
-    {"Lgetstacktr01;", "dummy", "()V"},
-    {"Lgetstacktr01;", "chain", "()V"},
+    {"LGetStackTraceCurrentThreadTest;", "check", "(Ljava/lang/Thread;)V"},
+    {"LGetStackTraceCurrentThreadTest;", "dummy", "()V"},
+    {"LGetStackTraceCurrentThreadTest;", "chain", "()V"},
     {"LTask;", "run", "()V"},
     {"Ljava/lang/Thread;", "run", "()V"}
 };
@@ -67,13 +67,13 @@ jint Agent_OnLoad(JavaVM *jvm, char *options, void *reserved) {
 }
 
 JNIEXPORT void JNICALL
-Java_getstacktr01_chain(JNIEnv *env, jclass cls) {
+Java_GetStackTraceCurrentThreadTest_chain(JNIEnv *env, jclass cls) {
   jmethodID mid = env->GetStaticMethodID(cls, "dummy", "()V");
   env->CallStaticVoidMethod(cls, mid);
 }
 
 JNIEXPORT void JNICALL
-Java_getstacktr01_check(JNIEnv *jni, jclass cls, jthread thread) {
+Java_GetStackTraceCurrentThreadTest_check(JNIEnv *jni, jclass cls, jthread thread) {
   jint result = PASSED;
   jvmtiFrameInfo frames[MAX_NUMBER_OF_STACK_FRAMES];
   jclass caller_class;
