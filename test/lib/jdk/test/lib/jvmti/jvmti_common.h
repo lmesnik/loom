@@ -111,6 +111,10 @@ create_raw_monitor(jvmtiEnv *jvmti, const char* name) {
   return lock;
 }
 
+void destroy_raw_monitor(jvmtiEnv *jvmti, JNIEnv *jni, jrawMonitorID lock) {
+  check_jvmti_status(jni, jvmti->DestroyRawMonitor(lock), "DestroyRawMonitor failed.");
+}
+
 class RawMonitorLocker {
  private:
   jvmtiEnv* _jvmti;
@@ -219,6 +223,22 @@ get_frame_count(jvmtiEnv *jvmti, JNIEnv* jni, jthread thread) {
   jvmtiError err = jvmti->GetFrameCount(thread, &frame_count);
   check_jvmti_status(jni, err, "get_frame_count: error in JVMTI GetFrameCount call");
   return frame_count;
+}
+
+static jvmtiThreadInfo
+get_thread_info(jvmtiEnv *jvmti, JNIEnv* jni, jthread thread) {
+  jvmtiThreadInfo thr_info;
+  jvmtiError err = jvmti->GetThreadInfo(thread, &thr_info);
+  check_jvmti_status(jni, err, "get_thread_info: error in JVMTI GetThreadInfo call");
+  return thr_info;
+}
+
+static jint
+get_thread_state(jvmtiEnv *jvmti, JNIEnv* jni, jthread thread) {
+  jint thread_state;
+  jvmtiError err = jvmti->GetThreadState(thread, &thread_state);
+  check_jvmti_status(jni, err, "get_thread_state: error in JVMTI GetThreadState call");
+  return thread_state;
 }
 
 static char*
@@ -675,12 +695,10 @@ isThreadExpected(jvmtiEnv *jvmti, jthread thread) {
   return 1;
 }
 
-jthread
-nsk_jvmti_threadByName(jvmtiEnv* jvmti, JNIEnv* jni, const char name[]) {
+jthread find_thread_by_name(jvmtiEnv* jvmti, JNIEnv* jni, const char name[]) {
   jthread* threads = NULL;
   jint count = 0;
-  jthread foundThread = NULL;
-  int i;
+  jthread found_thread = NULL;
 
   if (name == NULL) {
     return NULL;
@@ -688,23 +706,23 @@ nsk_jvmti_threadByName(jvmtiEnv* jvmti, JNIEnv* jni, const char name[]) {
 
   check_jvmti_status(jni, jvmti->GetAllThreads(&count, &threads), "");
 
-  for (i = 0; i < count; i++) {
-    jvmtiThreadInfo info;
-
-    check_jvmti_status(jni, jvmti->GetThreadInfo(threads[i], &info), "");
-
+  for (int i = 0; i < count; i++) {
+    jvmtiThreadInfo info = get_thread_info(jvmti, jni, threads[i]);
     if (info.name != NULL && strcmp(name, info.name) == 0) {
-      foundThread = threads[i];
+      found_thread = threads[i];
       break;
     }
   }
 
   check_jvmti_status(jni, jvmti->Deallocate((unsigned char*)threads), "");
 
-  foundThread = (jthread) jni->NewGlobalRef(foundThread);
-  return foundThread;
+  found_thread = (jthread) jni->NewGlobalRef(found_thread);
+  return found_thread;
 }
 
+jthread nsk_jvmti_threadByName(jvmtiEnv* jvmti, JNIEnv* jni, const char name[]) {
+  return find_thread_by_name(jvmti, jni, name);
+}
 /*
  * JVMTI Extension Mechanism
  */

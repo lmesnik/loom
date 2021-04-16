@@ -31,7 +31,6 @@ static jvmtiEnv *jvmti_env = NULL;
 
 jint Agent_OnLoad(JavaVM *jvm, char *options, void *reserved) {
   jvmtiCapabilities caps;
-  jvmtiError err;
   jint res;
 
   res = jvm->GetEnv((void **) &jvmti_env, JVMTI_VERSION_1_1);
@@ -44,27 +43,19 @@ jint Agent_OnLoad(JavaVM *jvm, char *options, void *reserved) {
   caps.can_support_virtual_threads = true;
   caps.can_suspend = true;
 
-  err = jvmti_env->AddCapabilities(&caps);
+  jvmtiError err = jvmti_env->AddCapabilities(&caps);
   if (err != JVMTI_ERROR_NONE) {
     printf("(AddCapabilities) unexpected error: %s (%d)\n",
            TranslateError(err), err);
     return JNI_ERR;
   }
 
-  err = jvmti_env->GetCapabilities(&caps);
-  if (err != JVMTI_ERROR_NONE) {
-    printf("(GetCapabilities) unexpected error: %s (%d)\n",
-           TranslateError(err), err);
-    return JNI_ERR;
-  }
-
-
   return JNI_OK;
 }
 
 JNIEXPORT jboolean JNICALL Java_framecnt01_checkFrames0(JNIEnv *jni, jclass cls, jthread thread,
                                                         jboolean suspend, jint expected_count) {
-  jint result = true;
+  jboolean result = JNI_TRUE;
 
   if (suspend) {
     suspend_thread(jvmti_env, jni, thread);
@@ -76,7 +67,7 @@ JNIEXPORT jboolean JNICALL Java_framecnt01_checkFrames0(JNIEnv *jni, jclass cls,
   if (frame_count != expected_count) {
     printf("Thread #%s: number of frames expected: %d, got: %d\n",
            get_thread_name(jvmti_env, jni, thread), expected_count, frame_count);
-    result = false;
+    result = JNI_FALSE;
   }
 
   if (suspend) {

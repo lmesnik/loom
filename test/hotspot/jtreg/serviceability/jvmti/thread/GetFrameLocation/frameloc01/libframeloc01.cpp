@@ -100,6 +100,7 @@ jint Agent_OnLoad(JavaVM *jvm, char *options, void *reserved) {
 
   memset(&caps, 0, sizeof(caps));
   caps.can_suspend = true;
+  caps.can_generate_exception_events = true;
   err = jvmti_env->AddCapabilities(&caps);
   if (err != JVMTI_ERROR_NONE) {
     printf("(AddCapabilities) unexpected error: %s (%d)\n",
@@ -107,28 +108,16 @@ jint Agent_OnLoad(JavaVM *jvm, char *options, void *reserved) {
     return JNI_ERR;
   }
 
-  err = jvmti_env->GetCapabilities(&caps);
+
+
+  callbacks.ExceptionCatch = &ExceptionCatch;
+  err = jvmti_env->SetEventCallbacks(&callbacks, sizeof(callbacks));
   if (err != JVMTI_ERROR_NONE) {
-    printf("(GetCapabilities) unexpected error: %s (%d)\n",
+    printf("(SetEventCallbacks) unexpected error: %s (%d)\n",
            TranslateError(err), err);
     return JNI_ERR;
   }
 
-  if (!caps.can_suspend) {
-    printf("Warning: suspend/resume is not implemented\n");
-  }
-
-  if (caps.can_generate_exception_events) {
-    callbacks.ExceptionCatch = &ExceptionCatch;
-    err = jvmti_env->SetEventCallbacks(&callbacks, sizeof(callbacks));
-    if (err != JVMTI_ERROR_NONE) {
-      printf("(SetEventCallbacks) unexpected error: %s (%d)\n",
-             TranslateError(err), err);
-      return JNI_ERR;
-    }
-  } else {
-    printf("Warning: ExceptionCatch event is not implemented\n");
-  }
 
   return JNI_OK;
 }
