@@ -25,17 +25,13 @@
 #include <string.h>
 #include "jvmti.h"
 #include "jvmti_common.h"
+#include "../get_stack_trace.h"
+
 
 extern "C" {
 
 #define PASSED 0
 #define STATUS_FAILED 2
-
-typedef struct {
-  const char *cls;
-  const char *name;
-  const char *sig;
-} frame_info;
 
 static jvmtiEnv *jvmti = NULL;
 static frame_info expected_virtual_frames[] = {

@@ -25,30 +25,19 @@
 #include <string.h>
 #include "jvmti.h"
 #include "jvmti_common.h"
+#include "../get_stack_trace.h"
 
 extern "C" {
 
-#define PASSED 0
-#define STATUS_FAILED 2
-
-typedef struct {
-  const char *cls;
-  const char *name;
-  const char *sig;
-} frame_info;
-
 static jvmtiEnv *jvmti = NULL;
-static jvmtiCapabilities caps;
-static jint result = PASSED;
-static frame_info frames[] = {
+static frame_info expected_frames[] = {
     {"Ljava/lang/Object;", "wait", "()V"},
     {"Lgetstacktr03;", "dummy", "()V"},
     {"Lgetstacktr03;", "chain", "()V"},
     {"Lgetstacktr03$TestThread;", "run", "()V"},
 };
 
-#define NUMBER_OF_STACK_FRAMES ((int) (sizeof(frames)/sizeof(frame_info)))
-#define MAX_NUMBER_OF_FRAMES 32
+#define NUMBER_OF_STACK_FRAMES ((int) (sizeof(expected_frames)/sizeof(frame_info)))
 
 jint Agent_OnLoad(JavaVM *jvm, char *options, void *reserved) {
   jvmtiError err;
@@ -58,29 +47,14 @@ jint Agent_OnLoad(JavaVM *jvm, char *options, void *reserved) {
     return JNI_ERR;
   }
 
-  err = jvmti->GetPotentialCapabilities(&caps);
-  if (err != JVMTI_ERROR_NONE) {
-    printf("(GetPotentialCapabilities) unexpected error: %s (%d)\n",
-           TranslateError(err), err);
-    return JNI_ERR;
-  }
+  jvmtiCapabilities caps;
+  memset(&caps, 0, sizeof(caps));
+  caps.can_suspend = 1;
 
   err = jvmti->AddCapabilities(&caps);
   if (err != JVMTI_ERROR_NONE) {
-    printf("(AddCapabilities) unexpected error: %s (%d)\n",
-           TranslateError(err), err);
+    printf("(AddCapabilities) unexpected error: %s (%d)\n", TranslateError(err), err);
     return JNI_ERR;
-  }
-
-  err = jvmti->GetCapabilities(&caps);
-  if (err != JVMTI_ERROR_NONE) {
-    printf("(GetCapabilities) unexpected error: %s (%d)\n",
-           TranslateError(err), err);
-    return JNI_ERR;
-  }
-
-  if (!caps.can_suspend) {
-    printf("Warning: suspend/resume is not implemented\n");
   }
 
   return JNI_OK;
@@ -88,109 +62,15 @@ jint Agent_OnLoad(JavaVM *jvm, char *options, void *reserved) {
 
 JNIEXPORT void JNICALL
 Java_getstacktr03_chain(JNIEnv *env, jclass cls) {
-  jmethodID mid;
-
-  mid = env->GetStaticMethodID(cls, "dummy", "()V");
-  if (mid == NULL) {
-    printf("Could not find method ID for dummy()V!\n");
-  } else {
-    env->CallStaticVoidMethod(cls, mid);
-  }
-
-  return;
+  jmethodID mid = env->GetStaticMethodID(cls, "dummy", "()V");
+  env->CallStaticVoidMethod(cls, mid);
 }
 
 JNIEXPORT int JNICALL
-Java_getstacktr03_check(JNIEnv *env, jclass cls, jthread thread) {
-  jvmtiError err;
-  jvmtiFrameInfo f[MAX_NUMBER_OF_FRAMES];
-  jclass callerClass;
-  char *sigClass, *name, *sig, *generic;
-  jint i, count;
-
-  if (jvmti == NULL) {
-    printf("JVMTI client was not properly loaded!\n");
-    return STATUS_FAILED;
-  }
-
-  err = jvmti->SuspendThread(thread);
-  if (err != JVMTI_ERROR_NONE) {
-    printf("(SuspendThread) unexpected error: %s (%d)\n",
-           TranslateError(err), err);
-    result = STATUS_FAILED;
-    return result;
-  }
-
-  err = jvmti->GetStackTrace(thread,
-                             0, MAX_NUMBER_OF_FRAMES, f, &count);
-  if (err != JVMTI_ERROR_NONE) {
-    printf("(GetStackTrace) unexpected error: %s (%d)\n",
-           TranslateError(err), err);
-    result = STATUS_FAILED;
-    return result;
-  }
-  if (count < NUMBER_OF_STACK_FRAMES) {
-    printf("Number of frames: %d is less then expected: %d\n",
-           count, NUMBER_OF_STACK_FRAMES);
-    result = STATUS_FAILED;
-  }
-  for (i = 0; i < count; i++) {
-    printf(">>> checking frame#%d ...\n", count - 1 - i);
-
-    err = jvmti->GetMethodDeclaringClass(f[count - 1 - i].method,
-                                         &callerClass);
-    if (err != JVMTI_ERROR_NONE) {
-      printf("(GetMethodDeclaringClass#%d) unexpected error: %s (%d)\n",
-             count - 1 - i, TranslateError(err), err);
-      result = STATUS_FAILED;
-      continue;
-    }
-    err = jvmti->GetClassSignature(callerClass,
-                                   &sigClass, &generic);
-    if (err != JVMTI_ERROR_NONE) {
-      printf("(GetClassSignature#%d) unexpected error: %s (%d)\n",
-             count - 1 - i, TranslateError(err), err);
-      result = STATUS_FAILED;
-      continue;
-    }
-    err = jvmti->GetMethodName(f[count - 1 - i].method,
-                               &name, &sig, &generic);
-    if (err != JVMTI_ERROR_NONE) {
-      printf("(GetMethodName#%d) unexpected error: %s (%d)\n",
-             count - 1 - i, TranslateError(err), err);
-      result = STATUS_FAILED;
-      continue;
-    }
-    printf(">>>   class:  \"%s\"\n", sigClass);
-    printf(">>>   method: \"%s%s\"\n", name, sig);
-    printf(">>>   %d ... done\n", i);
-
-    if (i < NUMBER_OF_STACK_FRAMES) {
-      if (sigClass == NULL || strcmp(sigClass, frames[NUMBER_OF_STACK_FRAMES - 1 - i].cls) != 0) {
-        printf("(frame#%d) wrong class sig: \"%s\", expected: \"%s\"\n",
-               NUMBER_OF_STACK_FRAMES - 1 - i, sigClass, frames[NUMBER_OF_STACK_FRAMES - 1 - i].cls);
-        result = STATUS_FAILED;
-      }
-      if (name == NULL || strcmp(name, frames[NUMBER_OF_STACK_FRAMES - 1 - i].name) != 0) {
-        printf("(frame#%d) wrong method name: \"%s\", expected: \"%s\"\n",
-               NUMBER_OF_STACK_FRAMES - 1 - i, name, frames[NUMBER_OF_STACK_FRAMES - 1 - i].name);
-        result = STATUS_FAILED;
-      }
-      if (sig == NULL || strcmp(sig, frames[NUMBER_OF_STACK_FRAMES - 1 - i].sig) != 0) {
-        printf("(frame#%d) wrong method sig: \"%s\", expected: \"%s\"\n",
-               NUMBER_OF_STACK_FRAMES - 1 - i, sig, frames[NUMBER_OF_STACK_FRAMES - 1 - i].sig);
-        result = STATUS_FAILED;
-      }
-    }
-  }
-
-  err = jvmti->ResumeThread(thread);
-  if (err != JVMTI_ERROR_NONE) {
-    printf("(ResumeThread) unexpected error: %s (%d)\n",
-           TranslateError(err), err);
-    result = STATUS_FAILED;
-  }
-
+Java_getstacktr03_check(JNIEnv *jni, jclass cls, jthread thread) {
+  suspend_thread(jvmti, jni, thread);
+  int result = compare_stack_trace(jvmti, jni, thread, expected_frames, NUMBER_OF_STACK_FRAMES);
+  resume_thread(jvmti, jni, thread);
   return result;
 }
 

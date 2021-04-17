@@ -40,11 +40,7 @@
  * @run main/othervm/native -agentlib:getstacktr03 getstacktr03
  */
 
-import java.io.PrintStream;
-
 public class getstacktr03 {
-
-    final static int JCK_STATUS_BASE = 95;
 
     static {
         System.loadLibrary("getstacktr03");
@@ -57,13 +53,6 @@ public class getstacktr03 {
     public static Object lockOut = new Object();
 
     public static void main(String args[]) {
-
-
-        // produce JCK-like exit status.
-        System.exit(run(args, System.out) + JCK_STATUS_BASE);
-    }
-
-    public static int run(String args[], PrintStream out) {
         int res;
         TestThread thr = new TestThread();
 
@@ -76,7 +65,6 @@ public class getstacktr03 {
             }
         }
 
-
         synchronized (lockOut) {
             res = check(thr);
             lockOut.notify();
@@ -88,7 +76,9 @@ public class getstacktr03 {
             throw new Error("Unexpected " + e);
         }
 
-        return res;
+        if (res == 0) {
+            throw new RuntimeException();
+        }
     }
 
     static void dummy() {
