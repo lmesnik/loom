@@ -32,7 +32,7 @@ typedef struct {
 } frame_info;
 
 
-int compare_stack_trace(jvmtiEnv *jvmti, JNIEnv *jni, jthread thread, frame_info expected_frames[], int expected_frames_length) {
+int compare_stack_trace(jvmtiEnv *jvmti, JNIEnv *jni, jthread thread, frame_info expected_frames[], int expected_frames_length, int offset = 0) {
   int result = JNI_TRUE;
   char *class_signature, *name, *sig, *generic;
   jint count;
@@ -40,15 +40,22 @@ int compare_stack_trace(jvmtiEnv *jvmti, JNIEnv *jni, jthread thread, frame_info
   jvmtiFrameInfo frames[MAX_NUMBER_OF_FRAMES];
   jclass caller_class;
 
+  printf("Calling compare_stack_trace for: \n");
+  print_stack_trace(jvmti, jni, thread);
+
   jvmtiError err = jvmti->GetStackTrace(thread, 0, MAX_NUMBER_OF_FRAMES, frames, &count);
   check_jvmti_status(jni, err, "GetStackTrace failed.");
-  if (count < expected_frames_length) {
-    printf("Number of expected_frames: %d is less then expected: %d\n",
-           count, expected_frames_length);
+
+  printf("Number of frames: %d, expected: %d\n", count, expected_frames_length - offset);
+
+
+  if (count < expected_frames_length - offset) {
+    printf("Number of expected_frames: %d is less then expected: %d\n", count, expected_frames_length);
     result = JNI_FALSE;
   }
-  for (int i = 0; i < count; i++) {
-    printf(">>> checking frame#%d ...\n", count - 1 - i);
+  for (int i = 0; i < count - offset; i++) {
+    int idx = count - 1 - i;
+    printf(">>> checking frame#%d ...\n", idx);
     check_jvmti_status(jni, jvmti->GetMethodDeclaringClass(frames[count - 1 - i].method, &caller_class), "GetMethodDeclaringClass failed.");
     check_jvmti_status(jni, jvmti->GetClassSignature(caller_class, &class_signature, &generic), "GetClassSignature");
     check_jvmti_status(jni, jvmti->GetMethodName(frames[count - 1 - i].method, &name, &sig, &generic), "GetMethodName");
@@ -57,27 +64,30 @@ int compare_stack_trace(jvmtiEnv *jvmti, JNIEnv *jni, jthread thread, frame_info
     printf(">>>   method: \"%s%s\"\n", name, sig);
     printf(">>>   %d ... done\n", i);
 
+    int exp_idx = expected_frames_length - 1 - i;
+
+    printf("expected idx %d\n", exp_idx);
+    fflush(0);
     if (i < expected_frames_length) {
-      if (class_signature == NULL || strcmp(class_signature, expected_frames[expected_frames_length - 1 - i].cls) != 0) {
+      if (class_signature == NULL || strcmp(class_signature, expected_frames[exp_idx].cls) != 0) {
         printf("(frame#%d) wrong class sig: \"%s\", expected: \"%s\"\n",
-               expected_frames_length - 1 - i, class_signature, expected_frames[expected_frames_length - 1 - i].cls);
+               exp_idx, class_signature, expected_frames[exp_idx].cls);
         result = JNI_FALSE;
       }
-      if (name == NULL || strcmp(name, expected_frames[expected_frames_length - 1 - i].name) != 0) {
+      if (name == NULL || strcmp(name, expected_frames[exp_idx].name) != 0) {
         printf("(frame#%d) wrong method name: \"%s\", expected: \"%s\"\n",
-               expected_frames_length - 1 - i, name, expected_frames[expected_frames_length - 1 - i].name);
+               exp_idx, name, expected_frames[exp_idx].name);
         result = JNI_FALSE;
       }
-      if (sig == NULL || strcmp(sig, expected_frames[expected_frames_length - 1 - i].sig) != 0) {
+      if (sig == NULL || strcmp(sig, expected_frames[exp_idx].sig) != 0) {
         printf("(frame#%d) wrong method sig: \"%s\", expected: \"%s\"\n",
-               expected_frames_length - 1 - i, sig, expected_frames[expected_frames_length - 1 - i].sig);
+               exp_idx, sig, expected_frames[exp_idx].sig);
         result = JNI_FALSE;
       }
     }
   }
   return result;
 }
-
 
 
 #endif //GET_STACK_TRACE_H
