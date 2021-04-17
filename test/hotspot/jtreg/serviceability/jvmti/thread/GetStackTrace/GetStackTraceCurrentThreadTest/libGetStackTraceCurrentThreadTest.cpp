@@ -96,7 +96,7 @@ Java_GetStackTraceCurrentThreadTest_check(JNIEnv *jni, jclass cls, jthread threa
     result = STATUS_FAILED;
   }
 
-  for (int i = 0; i < count; i++) {
+  for (int i = count - 1; i >= 0; i--) {
     printf(">>> checking frame#%d ...\n", i);
 
     check_jvmti_status(jni, jvmti->GetMethodDeclaringClass(frames[i].method, &caller_class), "GetMethodDeclaringClass failed.");
