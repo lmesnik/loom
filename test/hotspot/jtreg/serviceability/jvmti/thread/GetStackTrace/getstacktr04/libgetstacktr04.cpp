@@ -49,9 +49,7 @@ static frame_info frames[] = {
 void JNICALL Breakpoint(jvmtiEnv *jvmti_env, JNIEnv *jni,
                         jthread thr, jmethodID method, jlocation location) {
   if (mid != method) {
-    printf("ERROR: didn't know where we got called from");
-    result = STATUS_FAILED;
-    return;
+    jni->FatalError("ERROR: didn't know where we got called from");
   }
   result = compare_stack_trace(jvmti, jni, thr, frames, NUMBER_OF_STACK_FRAMES) == JNI_TRUE? PASSED : STATUS_FAILED;
 }
@@ -90,9 +88,7 @@ JNIEXPORT void JNICALL
 Java_getstacktr04_getReady(JNIEnv *jni, jclass cls, jclass clazz) {
   mid = jni->GetMethodID(clazz, "checkPoint", "()V");
   if (mid == NULL) {
-    printf("Cannot find Method ID for method checkPoint\n");
-    result = STATUS_FAILED;
-    return;
+    jni->FatalError("Cannot find Method ID for method checkPoint\n");
   }
 
   check_jvmti_status(jni, jvmti->SetBreakpoint(mid, 0), "SetBreakpoint failed.");

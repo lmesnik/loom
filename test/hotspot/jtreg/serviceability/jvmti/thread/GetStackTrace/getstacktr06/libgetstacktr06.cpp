@@ -101,8 +101,6 @@ void JNICALL Breakpoint(jvmtiEnv *jvmti_env, JNIEnv *env,
 
 void JNICALL SingleStep(jvmtiEnv *jvmti_env, JNIEnv *env,
                         jthread thr, jmethodID method, jlocation location) {
-  jvmtiError err;
-
   set_event_notification_mode(jvmti, env, JVMTI_DISABLE,JVMTI_EVENT_SINGLE_STEP, thr);
   result = compare_stack_trace(jvmti_env, env, thr, frames, NUMBER_OF_STACK_FRAMES) == JNI_TRUE? PASSED : STATUS_FAILED;
 
