@@ -51,7 +51,9 @@ void JNICALL Breakpoint(jvmtiEnv *jvmti_env, JNIEnv *jni,
   if (mid != method) {
     jni->FatalError("ERROR: didn't know where we got called from");
   }
-  result = compare_stack_trace(jvmti, jni, thr, frames, NUMBER_OF_STACK_FRAMES) == JNI_TRUE? PASSED : STATUS_FAILED;
+  if (!compare_stack_trace(jvmti_env, jni, thr, frames, NUMBER_OF_STACK_FRAMES)) {
+    jni->ThrowNew(jni->FindClass("java/lang/RuntimeException"), "Stacktrace differs from expected.");
+  }
 }
 
 jint Agent_OnLoad(JavaVM *jvm, char *options, void *reserved) {

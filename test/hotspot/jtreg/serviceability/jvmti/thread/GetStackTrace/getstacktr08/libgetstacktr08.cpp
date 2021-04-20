@@ -29,8 +29,6 @@
 
 extern "C" {
 
-#define PASSED 0
-#define STATUS_FAILED 2
 
 static jvmtiEnv *jvmti = NULL;
 static jvmtiEventCallbacks callbacks;
@@ -55,36 +53,35 @@ void JNICALL Breakpoint(jvmtiEnv *jvmti_env, JNIEnv *jni, jthread thr, jmethodID
   if (mid_checkPoint != method) {
     jni->FatalError("ERROR: don't know where we get called from");
   }
-  check_jvmti_status(jni, jvmti->ClearBreakpoint(mid_checkPoint, 0), "ClearBreakpoint failed.");
+  check_jvmti_status(jni, jvmti_env->ClearBreakpoint(mid_checkPoint, 0), "ClearBreakpoint failed.");
 
-  if (!compare_stack_trace(jvmti, jni,  testedThread, frames, NUMBER_OF_STACK_FRAMES)) {
+  if (!compare_stack_trace(jvmti_env, jni,  testedThread, frames, NUMBER_OF_STACK_FRAMES)) {
     jni->ThrowNew(jni->FindClass("java/lang/RuntimeException"), "Stacktrace differs from expected.");
   }
 
-  set_event_notification_mode(jvmti, jni, JVMTI_ENABLE, JVMTI_EVENT_SINGLE_STEP, thr);
+  set_event_notification_mode(jvmti_env, jni, JVMTI_ENABLE, JVMTI_EVENT_SINGLE_STEP, thr);
   printf(">>> stepping ...\n");
 
 }
 
 void JNICALL SingleStep(jvmtiEnv *jvmti_env, JNIEnv *jni,
                         jthread thread, jmethodID method, jlocation location) {
-  jvmtiError err;
   jclass klass;
   jvmtiClassDefinition classDef;
 
   if (wasFramePop == JNI_FALSE) {
 
-    if (!compare_stack_trace(jvmti, jni, testedThread, frames, NUMBER_OF_STACK_FRAMES, 1)) {
+    if (!compare_stack_trace(jvmti_env, jni, testedThread, frames, NUMBER_OF_STACK_FRAMES, 1)) {
       jni->ThrowNew(jni->FindClass("java/lang/RuntimeException"), "Stacktrace differs from expected.");
     }
 
     printf(">>> popping frame ...\n");
 
-    check_jvmti_status(jni, jvmti->PopFrame(thread), "PopFrame failed.");
+    check_jvmti_status(jni, jvmti_env->PopFrame(thread), "PopFrame failed.");
     wasFramePop = JNI_TRUE;
   } else {
-    set_event_notification_mode(jvmti, jni, JVMTI_DISABLE, JVMTI_EVENT_SINGLE_STEP, thread);
-    if (!compare_stack_trace(jvmti, jni, testedThread, frames, NUMBER_OF_STACK_FRAMES, 2)) {
+    set_event_notification_mode(jvmti_env, jni, JVMTI_DISABLE, JVMTI_EVENT_SINGLE_STEP, thread);
+    if (!compare_stack_trace(jvmti_env, jni, testedThread, frames, NUMBER_OF_STACK_FRAMES, 2)) {
       jni->ThrowNew(jni->FindClass("java/lang/RuntimeException"), "Stacktrace differs from expected.");
     }
 
@@ -93,24 +90,23 @@ void JNICALL SingleStep(jvmtiEnv *jvmti_env, JNIEnv *jni,
       jni->FatalError("ERROR: don't have any bytes");
     }
 
-    check_jvmti_status(jni, jvmti->GetMethodDeclaringClass(method, &klass), "GetMethodDeclaringClass failed.");
+    check_jvmti_status(jni, jvmti_env->GetMethodDeclaringClass(method, &klass), "GetMethodDeclaringClass failed.");
     printf(">>> redefining class ...\n");
 
     classDef.klass = klass;
     classDef.class_byte_count = jni->GetArrayLength(classBytes);
     classDef.class_bytes = (unsigned char *) jni->GetByteArrayElements(classBytes, NULL);
-    check_jvmti_status(jni, jvmti->RedefineClasses(1, &classDef), "RedefineClasses failed.");
+    check_jvmti_status(jni, jvmti_env->RedefineClasses(1, &classDef), "RedefineClasses failed.");
 
     jni->DeleteGlobalRef(classBytes);
     classBytes = NULL;
-    if (!compare_stack_trace(jvmti, jni, testedThread, frames, NUMBER_OF_STACK_FRAMES, 2)) {
+    if (!compare_stack_trace(jvmti_env, jni, testedThread, frames, NUMBER_OF_STACK_FRAMES, 2)) {
       jni->ThrowNew(jni->FindClass("java/lang/RuntimeException"), "Stacktrace differs from expected.");
     }
   }
 }
 
 jint Agent_OnLoad(JavaVM *jvm, char *options, void *reserved) {
-  jvmtiCapabilities caps;
   jvmtiError err;
   jint res = jvm->GetEnv((void **) &jvmti, JVMTI_VERSION_1_1);
   if (res != JNI_OK || jvmti == NULL) {
@@ -118,12 +114,10 @@ jint Agent_OnLoad(JavaVM *jvm, char *options, void *reserved) {
     return JNI_ERR;
   }
 
-  err = jvmti->GetPotentialCapabilities(&caps);
-  if (err != JVMTI_ERROR_NONE) {
-    printf("(GetPotentialCapabilities) unexpected error: %s (%d)\n",
-           TranslateError(err), err);
-    return JNI_ERR;
-  }
+  jvmtiCapabilities caps;
+  memset(&caps, 0, sizeof(caps));
+  caps.can_generate_breakpoint_events = 1;
+  caps.can_generate_single_step_events = 1;
 
   err = jvmti->AddCapabilities(&caps);
   if (err != JVMTI_ERROR_NONE) {
@@ -132,26 +126,15 @@ jint Agent_OnLoad(JavaVM *jvm, char *options, void *reserved) {
     return JNI_ERR;
   }
 
-  err = jvmti->GetCapabilities(&caps);
+  callbacks.Breakpoint = &Breakpoint;
+  callbacks.SingleStep = &SingleStep;
+  err = jvmti->SetEventCallbacks(&callbacks, sizeof(callbacks));
   if (err != JVMTI_ERROR_NONE) {
-    printf("(GetCapabilities) unexpected error: %s (%d)\n",
+    printf("(SetEventCallbacks) unexpected error: %s (%d)\n",
            TranslateError(err), err);
     return JNI_ERR;
   }
 
-  if (caps.can_generate_breakpoint_events &&
-      caps.can_generate_single_step_events) {
-    callbacks.Breakpoint = &Breakpoint;
-    callbacks.SingleStep = &SingleStep;
-    err = jvmti->SetEventCallbacks(&callbacks, sizeof(callbacks));
-    if (err != JVMTI_ERROR_NONE) {
-      printf("(SetEventCallbacks) unexpected error: %s (%d)\n",
-             TranslateError(err), err);
-      return JNI_ERR;
-    }
-  } else {
-    printf("Warning: Breakpoint or SingleStep event is not implemented\n");
-  }
 
   return JNI_OK;
 }
