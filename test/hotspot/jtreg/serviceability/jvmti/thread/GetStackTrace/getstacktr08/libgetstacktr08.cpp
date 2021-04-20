@@ -33,10 +33,9 @@ extern "C" {
 static jvmtiEnv *jvmti = NULL;
 static jvmtiEventCallbacks callbacks;
 static jboolean wasFramePop = JNI_FALSE;
-static jthread testedThread;
 static jmethodID mid_checkPoint, mid_chain4;
 static jbyteArray classBytes;
-static frame_info frames[] = {
+static frame_info expected_platform_frames[] = {
     {"Lgetstacktr08$TestThread;", "checkPoint", "()V"},
     {"Lgetstacktr08$TestThread;", "chain5", "()V"},
     {"Lgetstacktr08$TestThread;", "chain4", "()V"},
@@ -48,31 +47,57 @@ static frame_info frames[] = {
     {"Ljava/lang/Thread;", "run", "()V"},
 };
 
-#define NUMBER_OF_STACK_FRAMES ((int) (sizeof(frames)/sizeof(frame_info)))
+static frame_info expected_virtual_frames[] = {
+    {"Lgetstacktr08$TestThread;", "checkPoint", "()V"},
+    {"Lgetstacktr08$TestThread;", "chain5", "()V"},
+    {"Lgetstacktr08$TestThread;", "chain4", "()V"},
+    {"Lgetstacktr08;", "nativeChain", "()V"},
+    {"Lgetstacktr08$TestThread;", "chain3", "()V"},
+    {"Lgetstacktr08$TestThread;", "chain2", "()V"},
+    {"Lgetstacktr08$TestThread;", "chain1", "()V"},
+    {"Lgetstacktr08$TestThread;", "run", "()V"},
+    {"Ljava/lang/VirtualThread;", "run", "(Ljava/lang/Runnable;)V"},
+    {"Ljava/lang/VirtualThread$VThreadContinuation;", "lambda$new$0", "(Ljava/lang/VirtualThread;Ljava/lang/Runnable;)V"},
+    {"Ljava/lang/VirtualThread$VThreadContinuation$$Lambda;", "run", "()V"},
+    {"Ljava/lang/Continuation;", "enter0", "()V"},
+    {"Ljava/lang/Continuation;", "enter", "(Ljava/lang/Continuation;Z)V"},
+};
 
-void JNICALL Breakpoint(jvmtiEnv *jvmti_env, JNIEnv *jni, jthread thr, jmethodID method, jlocation location) {
+int compare_stack_trace(jvmtiEnv *jvmti, JNIEnv *jni, jthread thread, int offset = 0) {
+  frame_info *expected_frames = jni->IsVirtualThread(thread)
+      ? expected_virtual_frames
+      : expected_platform_frames;
+  int expected_number_of_stack_frames = jni->IsVirtualThread(thread)
+      ? ((int) (sizeof(expected_virtual_frames) / sizeof(frame_info)))
+      : ((int) (sizeof(expected_platform_frames) / sizeof(frame_info)));
+  return compare_stack_trace(jvmti, jni, thread, expected_frames, expected_number_of_stack_frames, offset);
+}
+
+void JNICALL Breakpoint(jvmtiEnv *jvmti_env, JNIEnv *jni, jthread thread, jmethodID method, jlocation location) {
   if (mid_checkPoint != method) {
     jni->FatalError("ERROR: don't know where we get called from");
   }
   check_jvmti_status(jni, jvmti_env->ClearBreakpoint(mid_checkPoint, 0), "ClearBreakpoint failed.");
 
-  if (!compare_stack_trace(jvmti_env, jni,  testedThread, frames, NUMBER_OF_STACK_FRAMES)) {
+  if (!compare_stack_trace(jvmti_env, jni,  thread)) {
     jni->ThrowNew(jni->FindClass("java/lang/RuntimeException"), "Stacktrace differs from expected.");
+    return;
   }
 
-  set_event_notification_mode(jvmti_env, jni, JVMTI_ENABLE, JVMTI_EVENT_SINGLE_STEP, thr);
+  set_event_notification_mode(jvmti_env, jni, JVMTI_ENABLE, JVMTI_EVENT_SINGLE_STEP, thread);
   printf(">>> stepping ...\n");
-
 }
 
 void JNICALL SingleStep(jvmtiEnv *jvmti_env, JNIEnv *jni,
                         jthread thread, jmethodID method, jlocation location) {
   jclass klass;
   jvmtiClassDefinition classDef;
+  printf(">>> In SingleStep ...\n");
+  print_stack_trace(jvmti_env, jni, thread);
 
   if (wasFramePop == JNI_FALSE) {
 
-    if (!compare_stack_trace(jvmti_env, jni, testedThread, frames, NUMBER_OF_STACK_FRAMES, 1)) {
+    if (!compare_stack_trace(jvmti_env, jni, thread, 1)) {
       // Disable single-stepping to don't cause stackoverflow
       set_event_notification_mode(jvmti_env, jni, JVMTI_DISABLE, JVMTI_EVENT_SINGLE_STEP, thread);
       jni->ThrowNew(jni->FindClass("java/lang/RuntimeException"), "Stacktrace differs from expected.");
@@ -84,7 +109,7 @@ void JNICALL SingleStep(jvmtiEnv *jvmti_env, JNIEnv *jni,
     wasFramePop = JNI_TRUE;
   } else {
     set_event_notification_mode(jvmti_env, jni, JVMTI_DISABLE, JVMTI_EVENT_SINGLE_STEP, thread);
-    if (!compare_stack_trace(jvmti_env, jni, testedThread, frames, NUMBER_OF_STACK_FRAMES, 2)) {
+    if (!compare_stack_trace(jvmti_env, jni, thread, 2)) {
       jni->ThrowNew(jni->FindClass("java/lang/RuntimeException"), "Stacktrace differs from expected.");
     }
 
@@ -103,7 +128,7 @@ void JNICALL SingleStep(jvmtiEnv *jvmti_env, JNIEnv *jni,
 
     jni->DeleteGlobalRef(classBytes);
     classBytes = NULL;
-    if (!compare_stack_trace(jvmti_env, jni, testedThread, frames, NUMBER_OF_STACK_FRAMES, 2)) {
+    if (!compare_stack_trace(jvmti_env, jni, thread, 2)) {
       jni->ThrowNew(jni->FindClass("java/lang/RuntimeException"), "Stacktrace differs from expected.");
     }
   }
@@ -145,8 +170,7 @@ jint Agent_OnLoad(JavaVM *jvm, char *options, void *reserved) {
 JNIEXPORT void JNICALL
 Java_getstacktr08_getReady(JNIEnv *jni, jclass cls, jclass clazz, jbyteArray bytes) {
   classBytes = (jbyteArray) jni->NewGlobalRef(bytes);
-
-
+  wasFramePop = JNI_FALSE;
   mid_checkPoint = jni->GetStaticMethodID(clazz, "checkPoint", "()V");
   mid_chain4 = jni->GetStaticMethodID(clazz, "chain4", "()V");
 
@@ -159,7 +183,7 @@ Java_getstacktr08_nativeChain(JNIEnv *jni, jclass cls) {
   if (mid_chain4 != NULL) {
     jni->CallStaticVoidMethod(cls, mid_chain4);
   }
-  if (!compare_stack_trace(jvmti, jni,  testedThread, frames, NUMBER_OF_STACK_FRAMES, 3)) {
+  if (!compare_stack_trace(jvmti, jni, get_current_thread(jvmti, jni), 3)) {
     jni->ThrowNew(jni->FindClass("java/lang/RuntimeException"), "Stacktrace differs from expected.");
   }
 }

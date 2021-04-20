@@ -68,8 +68,6 @@ public class getstacktr08 {
         ClassLoader cl = getstacktr08.class.getClassLoader();
         Thread thread = Thread.ofPlatform().unstarted(new TestThread());
 
-        // Read data from class
-
         InputStream in = cl.getSystemResourceAsStream(fileName);
         byte[] bytes = new byte[in.available()];
         in.read(bytes);
@@ -80,13 +78,10 @@ public class getstacktr08 {
         thread.start();
         thread.join();
 
-              /*
         Thread vThread = Thread.ofVirtual().unstarted(new TestThread());
+        getReady(TestThread.class, bytes);
         vThread.start();
         vThread.join();
-
-         */
-
     }
 
     static class TestThread implements Runnable {

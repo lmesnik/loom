@@ -45,9 +45,6 @@ import java.io.PrintStream;
 
 public class getstacktr06 {
 
-    final static int FAILED = 2;
-    final static int JCK_STATUS_BASE = 95;
-
     static {
         System.loadLibrary("getstacktr06");
     }
@@ -60,9 +57,13 @@ public class getstacktr06 {
         thread.start();
         thread.join();
 
+        /*
+         PopFrame not implemented for virtual threads yet.
         Thread vThread = Thread.ofVirtual().unstarted(new TestThread());
+        getReady(TestThread.class);
         vThread.start();
         vThread.join();
+        */
     }
 
     static class TestThread implements Runnable {

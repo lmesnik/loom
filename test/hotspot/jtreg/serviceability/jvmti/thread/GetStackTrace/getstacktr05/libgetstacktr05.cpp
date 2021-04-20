@@ -33,7 +33,7 @@ static jvmtiEnv *jvmti = NULL;
 static jvmtiCapabilities caps;
 static jvmtiEventCallbacks callbacks;
 static jmethodID mid;
-static frame_info frames[] = {
+static frame_info expected_platform_frames[] = {
     {"Lgetstacktr05$TestThread;", "chain4", "()V"},
     {"Lgetstacktr05$TestThread;", "chain3", "()V"},
     {"Lgetstacktr05$TestThread;", "chain2", "()V"},
@@ -42,9 +42,21 @@ static frame_info frames[] = {
     {"Ljava/lang/Thread;", "run", "()V"},
 };
 
-#define NUMBER_OF_STACK_FRAMES ((int) (sizeof(frames)/sizeof(frame_info)))
+static frame_info expected_virtual_frames[] = {
+    {"Lgetstacktr05$TestThread;", "chain4", "()V"},
+    {"Lgetstacktr05$TestThread;", "chain3", "()V"},
+    {"Lgetstacktr05$TestThread;", "chain2", "()V"},
+    {"Lgetstacktr05$TestThread;", "chain1", "()V"},
+    {"Lgetstacktr05$TestThread;", "run", "()V"},
+    {"Ljava/lang/VirtualThread;", "run", "(Ljava/lang/Runnable;)V"},
+    {"Ljava/lang/VirtualThread$VThreadContinuation;", "lambda$new$0", "(Ljava/lang/VirtualThread;Ljava/lang/Runnable;)V"},
+    {"Ljava/lang/VirtualThread$VThreadContinuation$$Lambda;", "run", "()V"},
+    {"Ljava/lang/Continuation;", "enter0", "()V"},
+    {"Ljava/lang/Continuation;", "enter", "(Ljava/lang/Continuation;Z)V"},
+};
 
-void JNICALL Breakpoint(jvmtiEnv *jvmti_env, JNIEnv *jni, jthread thr, jmethodID method, jlocation location) {
+
+void JNICALL Breakpoint(jvmtiEnv *jvmti_env, JNIEnv *jni, jthread thread, jmethodID method, jlocation location) {
   jvmtiError err;
   jint frame_count = 0;
 
@@ -54,25 +66,33 @@ void JNICALL Breakpoint(jvmtiEnv *jvmti_env, JNIEnv *jni, jthread thr, jmethodID
 
   printf(">>> (bp) checking frame count ...\n");
 
-  check_jvmti_status(jni, jvmti_env->GetFrameCount(thr, &frame_count), "GetFrameCount failed.");
-
-  if (frame_count != NUMBER_OF_STACK_FRAMES + 1) {
-    printf("(bp) wrong frame count, expected: %d, actual: %d\n",
-           NUMBER_OF_STACK_FRAMES + 1, frame_count);
+  check_jvmti_status(jni, jvmti_env->GetFrameCount(thread, &frame_count), "GetFrameCount failed.");
+  int expected_number_of_stack_frames = jni->IsVirtualThread(thread)
+      ? ((int) (sizeof(expected_virtual_frames) / sizeof(frame_info)))
+      : ((int) (sizeof(expected_platform_frames) / sizeof(frame_info)));
+  if (frame_count != expected_number_of_stack_frames + 1) {
+    printf("(bp) wrong frame count, expected: %d, actual: %d\n", expected_number_of_stack_frames + 1, frame_count);
     jni->FatalError("Wrong number of frames.");
   }
 
   printf(">>> (bp)   frame_count: %d\n", frame_count);
 
-  set_event_notification_mode(jvmti_env, JVMTI_ENABLE, JVMTI_EVENT_SINGLE_STEP, thr);
+  set_event_notification_mode(jvmti_env, JVMTI_ENABLE, JVMTI_EVENT_SINGLE_STEP, thread);
   printf(">>> stepping ...\n");
 }
 
 
 void JNICALL SingleStep(jvmtiEnv *jvmti_env, JNIEnv *jni,
-                        jthread thr, jmethodID method, jlocation location) {
-  set_event_notification_mode(jvmti, jni,JVMTI_DISABLE,JVMTI_EVENT_SINGLE_STEP, thr);
-  if (!compare_stack_trace(jvmti_env, jni, thr, frames, NUMBER_OF_STACK_FRAMES)) {
+                        jthread thread, jmethodID method, jlocation location) {
+  set_event_notification_mode(jvmti, jni, JVMTI_DISABLE, JVMTI_EVENT_SINGLE_STEP, thread);
+  frame_info *expected_frames = jni->IsVirtualThread(thread)
+      ? expected_virtual_frames
+      : expected_platform_frames;
+  int expected_number_of_stack_frames = jni->IsVirtualThread(thread)
+      ? ((int) (sizeof(expected_virtual_frames) / sizeof(frame_info)))
+      : ((int) (sizeof(expected_platform_frames) / sizeof(frame_info)));
+
+  if (!compare_stack_trace(jvmti_env, jni, thread, expected_frames, expected_number_of_stack_frames)) {
     jni->ThrowNew(jni->FindClass("java/lang/RuntimeException"), "Stacktrace differs from expected.");
   }
 }

@@ -38,7 +38,7 @@ static jvmtiEventCallbacks callbacks;
 static jint result = PASSED;
 static jmethodID mid;
 static jbyteArray classBytes;
-static frame_info frames[] = {
+static frame_info expected_platform_frames[] = {
     {"Lgetstacktr07$TestThread;", "checkPoint", "()V"},
     {"Lgetstacktr07$TestThread;", "chain4", "()V"},
     {"Lgetstacktr07$TestThread;", "chain3", "()V"},
@@ -48,9 +48,22 @@ static frame_info frames[] = {
     {"Ljava/lang/Thread;", "run", "()V"},
 };
 
-#define NUMBER_OF_STACK_FRAMES ((int) (sizeof(frames)/sizeof(frame_info)))
+static frame_info expected_virtual_frames[] = {
+    {"Lgetstacktr07$TestThread;", "checkPoint", "()V"},
+    {"Lgetstacktr07$TestThread;", "chain4", "()V"},
+    {"Lgetstacktr07$TestThread;", "chain3", "()V"},
+    {"Lgetstacktr07$TestThread;", "chain2", "()V"},
+    {"Lgetstacktr07$TestThread;", "chain1", "()V"},
+    {"Lgetstacktr07$TestThread;", "run", "()V"},
+    {"Ljava/lang/VirtualThread;", "run", "(Ljava/lang/Runnable;)V"},
+    {"Ljava/lang/VirtualThread$VThreadContinuation;", "lambda$new$0", "(Ljava/lang/VirtualThread;Ljava/lang/Runnable;)V"},
+    {"Ljava/lang/VirtualThread$VThreadContinuation$$Lambda;", "run", "()V"},
+    {"Ljava/lang/Continuation;", "enter0", "()V"},
+    {"Ljava/lang/Continuation;", "enter", "(Ljava/lang/Continuation;Z)V"},
+};
 
-void JNICALL Breakpoint(jvmtiEnv *jvmti_env, JNIEnv *jni, jthread thr, jmethodID method, jlocation location) {
+
+void JNICALL Breakpoint(jvmtiEnv *jvmti_env, JNIEnv *jni, jthread thread, jmethodID method, jlocation location) {
   jclass klass;
   jvmtiClassDefinition class_def;
 
@@ -75,9 +88,17 @@ void JNICALL Breakpoint(jvmtiEnv *jvmti_env, JNIEnv *jni, jthread thr, jmethodID
   jni->DeleteGlobalRef(classBytes);
   classBytes = NULL;
 
-  if (!compare_stack_trace(jvmti, jni, thr, frames, NUMBER_OF_STACK_FRAMES)) {
+  frame_info *expected_frames = jni->IsVirtualThread(thread)
+      ? expected_virtual_frames
+      : expected_platform_frames;
+  int expected_number_of_stack_frames = jni->IsVirtualThread(thread)
+      ? ((int) (sizeof(expected_virtual_frames) / sizeof(frame_info)))
+      : ((int) (sizeof(expected_platform_frames) / sizeof(frame_info)));
+
+  if (!compare_stack_trace(jvmti_env, jni, thread, expected_frames, expected_number_of_stack_frames)) {
     jni->ThrowNew(jni->FindClass("java/lang/RuntimeException"), "Stacktrace differs from expected.");
   }
+
 }
 
 jint Agent_OnLoad(JavaVM *jvm, char *options, void *reserved) {

@@ -65,12 +65,11 @@ public class getstacktr07 {
         getReady(TestThread.class, bytes);
         thread.start();
         thread.join();
-        /*
+
         Thread vThread = Thread.ofVirtual().unstarted(new TestThread());
+        getReady(TestThread.class, bytes);
         vThread.start();
         vThread.join();
-
-         */
     }
 
     static class TestThread implements Runnable {
