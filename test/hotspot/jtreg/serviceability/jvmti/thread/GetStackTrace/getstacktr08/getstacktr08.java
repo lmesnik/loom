@@ -77,11 +77,13 @@ public class getstacktr08 {
 
         thread.start();
         thread.join();
-
+        /* PopFrame not implemented for virtual threads yet.
         Thread vThread = Thread.ofVirtual().unstarted(new TestThread());
         getReady(TestThread.class, bytes);
         vThread.start();
         vThread.join();
+        */
+ 
     }
 
     static class TestThread implements Runnable {
