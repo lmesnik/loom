@@ -45,6 +45,7 @@ static frame_info frames[] = {
     {"Lgetstacktr08$TestThread;", "chain2", "()V"},
     {"Lgetstacktr08$TestThread;", "chain1", "()V"},
     {"Lgetstacktr08$TestThread;", "run", "()V"},
+    {"Ljava/lang/Thread;", "run", "()V"},
 };
 
 #define NUMBER_OF_STACK_FRAMES ((int) (sizeof(frames)/sizeof(frame_info)))
@@ -72,6 +73,8 @@ void JNICALL SingleStep(jvmtiEnv *jvmti_env, JNIEnv *jni,
   if (wasFramePop == JNI_FALSE) {
 
     if (!compare_stack_trace(jvmti_env, jni, testedThread, frames, NUMBER_OF_STACK_FRAMES, 1)) {
+      // Disable single-stepping to don't cause stackoverflow
+      set_event_notification_mode(jvmti_env, jni, JVMTI_DISABLE, JVMTI_EVENT_SINGLE_STEP, thread);
       jni->ThrowNew(jni->FindClass("java/lang/RuntimeException"), "Stacktrace differs from expected.");
     }
 
@@ -118,6 +121,8 @@ jint Agent_OnLoad(JavaVM *jvm, char *options, void *reserved) {
   memset(&caps, 0, sizeof(caps));
   caps.can_generate_breakpoint_events = 1;
   caps.can_generate_single_step_events = 1;
+  caps.can_pop_frame = 1;
+  caps.can_redefine_classes = 1;
 
   err = jvmti->AddCapabilities(&caps);
   if (err != JVMTI_ERROR_NONE) {
@@ -134,19 +139,14 @@ jint Agent_OnLoad(JavaVM *jvm, char *options, void *reserved) {
            TranslateError(err), err);
     return JNI_ERR;
   }
-
-
   return JNI_OK;
 }
 
 JNIEXPORT void JNICALL
-Java_getstacktr08_getReady(JNIEnv *jni, jclass cls, jthread thr, jbyteArray bytes) {
-
-  testedThread = jni->NewGlobalRef(thr);
-
+Java_getstacktr08_getReady(JNIEnv *jni, jclass cls, jclass clazz, jbyteArray bytes) {
   classBytes = (jbyteArray) jni->NewGlobalRef(bytes);
 
-  jclass clazz = jni->GetObjectClass(thr);
+
   mid_checkPoint = jni->GetStaticMethodID(clazz, "checkPoint", "()V");
   mid_chain4 = jni->GetStaticMethodID(clazz, "chain4", "()V");
 

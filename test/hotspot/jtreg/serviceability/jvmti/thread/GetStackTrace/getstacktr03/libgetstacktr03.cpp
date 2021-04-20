@@ -30,14 +30,25 @@
 extern "C" {
 
 static jvmtiEnv *jvmti = NULL;
-static frame_info expected_frames[] = {
+static frame_info expected_platform_frames[] = {
     {"Ljava/lang/Object;", "wait", "()V"},
     {"Lgetstacktr03;", "dummy", "()V"},
     {"Lgetstacktr03;", "chain", "()V"},
-    {"Lgetstacktr03$TestThread;", "run", "()V"},
+    {"Lgetstacktr03$Task;", "run", "()V"},
+    {"Ljava/lang/Thread;", "run", "()V"}
 };
 
-#define NUMBER_OF_STACK_FRAMES ((int) (sizeof(expected_frames)/sizeof(frame_info)))
+static frame_info expected_virtual_frames[] = {
+    {"Ljava/lang/Object;", "wait", "()V"},
+    {"Lgetstacktr03;", "dummy", "()V"},
+    {"Lgetstacktr03;", "chain", "()V"},
+    {"Lgetstacktr03$Task;", "run", "()V"},
+    {"Ljava/lang/VirtualThread;", "run", "(Ljava/lang/Runnable;)V"},
+    {"Ljava/lang/VirtualThread$VThreadContinuation;", "lambda$new$0", "(Ljava/lang/VirtualThread;Ljava/lang/Runnable;)V"},
+    {"Ljava/lang/VirtualThread$VThreadContinuation$$Lambda$31.0x0000000800098810;", "run", "()V"},
+    {"Ljava/lang/Continuation;", "enter0", "()V"},
+    {"Ljava/lang/Continuation;", "enter", "(Ljava/lang/Continuation;Z)V"}
+};
 
 jint Agent_OnLoad(JavaVM *jvm, char *options, void *reserved) {
   jvmtiError err;
@@ -69,9 +80,18 @@ Java_getstacktr03_chain(JNIEnv *env, jclass cls) {
 JNIEXPORT int JNICALL
 Java_getstacktr03_check(JNIEnv *jni, jclass cls, jthread thread) {
   suspend_thread(jvmti, jni, thread);
-  int result = compare_stack_trace(jvmti, jni, thread, expected_frames, NUMBER_OF_STACK_FRAMES);
+  frame_info *expected_frames = jni->IsVirtualThread(thread)
+      ? expected_virtual_frames
+      : expected_platform_frames;
+  int expected_number_of_stack_frames = jni->IsVirtualThread(thread)
+      ? ((int) (sizeof(expected_virtual_frames) / sizeof(frame_info)))
+      : ((int) (sizeof(expected_platform_frames) / sizeof(frame_info)));
+
+  if (!compare_stack_trace(jvmti, jni, thread, expected_frames, expected_number_of_stack_frames)) {
+    jni->ThrowNew(jni->FindClass("java/lang/RuntimeException"), "Stacktrace differs from expected.");
+  }
   resume_thread(jvmti, jni, thread);
-  return result;
+  return 0;
 }
 
 }

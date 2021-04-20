@@ -29,29 +29,47 @@
 
 extern "C" {
 
-#define PASSED 0
-#define STATUS_FAILED 2
-
 static jvmtiEnv *jvmti = NULL;
-static jint result = PASSED;
 static jmethodID mid;
-static frame_info frames[] = {
+static frame_info expected_platform_frames[] = {
     {"Lgetstacktr04$TestThread;", "checkPoint", "()V"},
     {"Lgetstacktr04$TestThread;", "chain4", "()V"},
     {"Lgetstacktr04$TestThread;", "chain3", "()V"},
     {"Lgetstacktr04$TestThread;", "chain2", "()V"},
     {"Lgetstacktr04$TestThread;", "chain1", "()V"},
     {"Lgetstacktr04$TestThread;", "run", "()V"},
+    {"Ljava/lang/Thread;", "run", "()V"},
 };
 
-#define NUMBER_OF_STACK_FRAMES ((int) (sizeof(frames)/sizeof(frame_info)))
+static frame_info expected_virtual_frames[] = {
+    {"Lgetstacktr04$TestThread;", "checkPoint", "()V"},
+    {"Lgetstacktr04$TestThread;", "chain4", "()V"},
+    {"Lgetstacktr04$TestThread;", "chain3", "()V"},
+    {"Lgetstacktr04$TestThread;", "chain2", "()V"},
+    {"Lgetstacktr04$TestThread;", "chain1", "()V"},
+    {"Lgetstacktr04$TestThread;", "run", "()V"},
+    {"Ljava/lang/VirtualThread;", "run", "(Ljava/lang/Runnable;)V"},
+    {"Ljava/lang/VirtualThread$VThreadContinuation;", "lambda$new$0", "(Ljava/lang/VirtualThread;Ljava/lang/Runnable;)V"},
+    {"Ljava/lang/VirtualThread$VThreadContinuation$$Lambda;", "run", "()V"},
+    {"Ljava/lang/Continuation;", "enter0", "()V"},
+    {"Ljava/lang/Continuation;", "enter", "(Ljava/lang/Continuation;Z)V"},
+
+};
+
 
 void JNICALL Breakpoint(jvmtiEnv *jvmti_env, JNIEnv *jni,
-                        jthread thr, jmethodID method, jlocation location) {
+                        jthread thread, jmethodID method, jlocation location) {
+  frame_info *expected_frames = jni->IsVirtualThread(thread)
+      ? expected_virtual_frames
+      : expected_platform_frames;
+  int expected_number_of_stack_frames = jni->IsVirtualThread(thread)
+      ? ((int) (sizeof(expected_virtual_frames) / sizeof(frame_info)))
+      : ((int) (sizeof(expected_platform_frames) / sizeof(frame_info)));
+
   if (mid != method) {
     jni->FatalError("ERROR: didn't know where we got called from");
   }
-  if (!compare_stack_trace(jvmti_env, jni, thr, frames, NUMBER_OF_STACK_FRAMES)) {
+  if (!compare_stack_trace(jvmti_env, jni, thread, expected_frames, expected_number_of_stack_frames)) {
     jni->ThrowNew(jni->FindClass("java/lang/RuntimeException"), "Stacktrace differs from expected.");
   }
 }
@@ -78,8 +96,7 @@ jint Agent_OnLoad(JavaVM *jvm, char *options, void *reserved) {
   callbacks.Breakpoint = &Breakpoint;
   err = jvmti->SetEventCallbacks(&callbacks, sizeof(callbacks));
   if (err != JVMTI_ERROR_NONE) {
-    printf("(SetEventCallbacks) unexpected error: %s (%d)\n",
-           TranslateError(err), err);
+    printf("(SetEventCallbacks) unexpected error: %s (%d)\n", TranslateError(err), err);
     return JNI_ERR;
   }
 
@@ -95,11 +112,6 @@ Java_getstacktr04_getReady(JNIEnv *jni, jclass cls, jclass clazz) {
 
   check_jvmti_status(jni, jvmti->SetBreakpoint(mid, 0), "SetBreakpoint failed.");
   set_event_notification_mode(jvmti, jni, JVMTI_ENABLE,JVMTI_EVENT_BREAKPOINT, NULL);
-}
-
-JNIEXPORT jint JNICALL
-Java_getstacktr04_getRes(JNIEnv *env, jclass cls) {
-  return result;
 }
 
 }

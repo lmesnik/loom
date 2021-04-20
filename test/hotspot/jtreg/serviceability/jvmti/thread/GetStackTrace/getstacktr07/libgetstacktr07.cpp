@@ -45,6 +45,7 @@ static frame_info frames[] = {
     {"Lgetstacktr07$TestThread;", "chain2", "()V"},
     {"Lgetstacktr07$TestThread;", "chain1", "()V"},
     {"Lgetstacktr07$TestThread;", "run", "()V"},
+    {"Ljava/lang/Thread;", "run", "()V"},
 };
 
 #define NUMBER_OF_STACK_FRAMES ((int) (sizeof(frames)/sizeof(frame_info)))

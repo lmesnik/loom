@@ -39,37 +39,26 @@
  * @run main/othervm/native -agentlib:getstacktr04 getstacktr04
  */
 
-import java.io.PrintStream;
-
 public class getstacktr04 {
 
     static {
-        try {
-            System.loadLibrary("getstacktr04");
-        } catch (UnsatisfiedLinkError ule) {
-            System.err.println("Could not load getstacktr04 library");
-            System.err.println("java.library.path:"
-                + System.getProperty("java.library.path"));
-            throw ule;
-        }
+        System.loadLibrary("getstacktr04");
     }
 
     native static void getReady(Class clazz);
-    native static int getRes();
 
     public static void main(String args[]) throws Exception {
-        TestThread thr = new TestThread();
+        Thread thread = Thread.ofPlatform().unstarted(new TestThread());
         getReady(TestThread.class);
+        thread.start();
+        thread.join();
 
-        thr.start();
-        thr.join();
-
-        if (getRes() != 0) {
-            throw new RuntimeException();
-        }
+        Thread vThread = Thread.ofVirtual().unstarted(new TestThread());
+        vThread.start();
+        vThread.join();
     }
 
-    static class TestThread extends Thread {
+    static class TestThread implements Runnable {
         public void run() {
             chain1();
         }

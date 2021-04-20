@@ -53,9 +53,14 @@ public class getstacktr03 {
     public static Object lockOut = new Object();
 
     public static void main(String args[]) {
-        int res;
-        TestThread thr = new TestThread();
+        Thread thread = Thread.ofPlatform().unstarted(new Task());
+        test(thread);
 
+        Thread vthread = Thread.ofVirtual().unstarted(new Task());
+        test(vthread);
+    }
+
+    public static void test(Thread thr) {
         synchronized (lockIn) {
             thr.start();
             try {
@@ -66,7 +71,7 @@ public class getstacktr03 {
         }
 
         synchronized (lockOut) {
-            res = check(thr);
+            check(thr);
             lockOut.notify();
         }
 
@@ -74,10 +79,6 @@ public class getstacktr03 {
             thr.join();
         } catch (InterruptedException e) {
             throw new Error("Unexpected " + e);
-        }
-
-        if (res == 0) {
-            throw new RuntimeException();
         }
     }
 
@@ -93,10 +94,10 @@ public class getstacktr03 {
             }
         }
     }
-
-    static class TestThread extends Thread {
+    static class Task implements Runnable {
+        @Override
         public void run() {
-            chain();
+            getstacktr03.chain();
         }
     }
 }

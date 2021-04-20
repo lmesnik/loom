@@ -49,27 +49,23 @@ public class getstacktr06 {
     final static int JCK_STATUS_BASE = 95;
 
     static {
-        try {
-            System.loadLibrary("getstacktr06");
-        } catch (UnsatisfiedLinkError ule) {
-            System.err.println("Could not load getstacktr06 library");
-            System.err.println("java.library.path:"
-                + System.getProperty("java.library.path"));
-            throw ule;
-        }
+        System.loadLibrary("getstacktr06");
     }
 
     native static void getReady(Class clazz);
 
     public static void main(String args[]) throws Exception{
-        TestThread thr = new TestThread();
+        Thread thread = Thread.ofPlatform().unstarted(new TestThread());
         getReady(TestThread.class);
+        thread.start();
+        thread.join();
 
-        thr.start();
-        thr.join();
+        Thread vThread = Thread.ofVirtual().unstarted(new TestThread());
+        vThread.start();
+        vThread.join();
     }
 
-    static class TestThread extends Thread {
+    static class TestThread implements Runnable {
         public void run() {
             chain1();
         }

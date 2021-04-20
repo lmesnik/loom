@@ -43,27 +43,25 @@
 public class getstacktr05 {
 
     static {
-        try {
-            System.loadLibrary("getstacktr05");
-        } catch (UnsatisfiedLinkError ule) {
-            System.err.println("Could not load getstacktr05 library");
-            System.err.println("java.library.path:"
-                + System.getProperty("java.library.path"));
-            throw ule;
-        }
+        System.loadLibrary("getstacktr05");
     }
 
     native static void getReady(Class clazz);
 
     public static void main(String args[]) throws Exception {
-        TestThread testThread = new TestThread();
+        Thread thread = Thread.ofPlatform().unstarted(new TestThread());
         getReady(TestThread.class);
+        thread.start();
+        thread.join();
+/*
+        Thread vThread = Thread.ofVirtual().unstarted(new TestThread());
+        vThread.start();
+        vThread.join();
 
-        testThread.start();
-        testThread.join();
+ */
     }
 
-    static class TestThread extends Thread {
+    static class TestThread implements Runnable {
         public void run() {
             chain1();
         }

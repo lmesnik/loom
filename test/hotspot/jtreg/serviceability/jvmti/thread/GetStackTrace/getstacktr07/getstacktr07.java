@@ -48,21 +48,14 @@ public class getstacktr07 {
         TestThread.class.getName().replace('.', File.separatorChar) + ".class";
 
     static {
-        try {
-            System.loadLibrary("getstacktr07");
-        } catch (UnsatisfiedLinkError ule) {
-            System.err.println("Could not load getstacktr07 library");
-            System.err.println("java.library.path:"
-                + System.getProperty("java.library.path"));
-            throw ule;
-        }
+        System.loadLibrary("getstacktr07");
     }
 
     native static void getReady(Class clazz, byte bytes[]);
 
     public static void main(String args[]) throws Exception {
         ClassLoader cl = getstacktr07.class.getClassLoader();
-        TestThread testThread = new TestThread();
+        Thread thread = Thread.ofPlatform().unstarted(new TestThread());
 
         InputStream in = cl.getSystemResourceAsStream(fileName);
         byte[] bytes = new byte[in.available()];
@@ -70,12 +63,17 @@ public class getstacktr07 {
         in.close();
 
         getReady(TestThread.class, bytes);
+        thread.start();
+        thread.join();
+        /*
+        Thread vThread = Thread.ofVirtual().unstarted(new TestThread());
+        vThread.start();
+        vThread.join();
 
-        testThread.start();
-        testThread.join();
+         */
     }
 
-    static class TestThread extends Thread {
+    static class TestThread implements Runnable {
         public void run() {
             chain1();
         }

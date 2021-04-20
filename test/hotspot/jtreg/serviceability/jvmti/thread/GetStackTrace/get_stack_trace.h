@@ -32,7 +32,8 @@ typedef struct {
 } frame_info;
 
 
-int compare_stack_trace(jvmtiEnv *jvmti, JNIEnv *jni, jthread thread, frame_info expected_frames[], int expected_frames_length, int offset = 0) {
+int compare_stack_trace(jvmtiEnv *jvmti, JNIEnv *jni, jthread thread,
+                        frame_info expected_frames[], int expected_frames_length, int offset = 0) {
   int result = JNI_TRUE;
   char *class_signature, *name, *sig, *generic;
   jint count;
@@ -56,24 +57,36 @@ int compare_stack_trace(jvmtiEnv *jvmti, JNIEnv *jni, jthread thread, frame_info
   for (int i = 0; i < count - offset; i++) {
     int idx = count - 1 - i;
     printf(">>> checking frame#%d ...\n", idx);
-    check_jvmti_status(jni, jvmti->GetMethodDeclaringClass(frames[count - 1 - i].method, &caller_class), "GetMethodDeclaringClass failed.");
-    check_jvmti_status(jni, jvmti->GetClassSignature(caller_class, &class_signature, &generic), "GetClassSignature");
-    check_jvmti_status(jni, jvmti->GetMethodName(frames[count - 1 - i].method, &name, &sig, &generic), "GetMethodName");
+    check_jvmti_status(jni, jvmti->GetMethodDeclaringClass(frames[count - 1 - i].method, &caller_class),
+                       "GetMethodDeclaringClass failed.");
+    check_jvmti_status(jni, jvmti->GetClassSignature(caller_class, &class_signature, &generic),
+                       "GetClassSignature");
+    check_jvmti_status(jni, jvmti->GetMethodName(frames[count - 1 - i].method, &name, &sig, &generic),
+                       "GetMethodName");
 
     printf(">>>   class:  \"%s\"\n", class_signature);
     printf(">>>   method: \"%s%s\"\n", name, sig);
     printf(">>>   %d ... done\n", i);
 
     int exp_idx = expected_frames_length - 1 - i;
-
     printf("expected idx %d\n", exp_idx);
     fflush(0);
     if (i < expected_frames_length) {
-      if (class_signature == NULL || strcmp(class_signature, expected_frames[exp_idx].cls) != 0) {
+
+      // for generated classes don't compare lambda indicies
+      // Example: {"Ljava/lang/VirtualThread$VThreadContinuation$$Lambda$31.0x0000000800098340;"
+      unsigned int lambda_idx = strlen(expected_frames[exp_idx].cls);
+      const char *lambda = strstr(expected_frames[exp_idx].cls, "$$Lambda");
+      if (lambda != nullptr) {
+        lambda_idx = lambda - expected_frames[exp_idx].cls;
+        printf("Comparing only first %d chars in classname.\n", lambda_idx);
+      }
+      if (class_signature == NULL || strncmp(class_signature, expected_frames[exp_idx].cls, lambda_idx) != 0) {
         printf("(frame#%d) wrong class sig: \"%s\", expected: \"%s\"\n",
                exp_idx, class_signature, expected_frames[exp_idx].cls);
         result = JNI_FALSE;
       }
+
       if (name == NULL || strcmp(name, expected_frames[exp_idx].name) != 0) {
         printf("(frame#%d) wrong method name: \"%s\", expected: \"%s\"\n",
                exp_idx, name, expected_frames[exp_idx].name);

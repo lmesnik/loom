@@ -48,7 +48,9 @@
  * @run main/othervm/native -agentlib:getstacktr08 getstacktr08
  */
 
-import java.io.*;
+
+import java.io.File;
+import java.io.InputStream;
 
 public class getstacktr08 {
 
@@ -56,22 +58,15 @@ public class getstacktr08 {
         TestThread.class.getName().replace('.', File.separatorChar) + ".class";
 
     static {
-        try {
-            System.loadLibrary("getstacktr08");
-        } catch (UnsatisfiedLinkError ule) {
-            System.err.println("Could not load getstacktr08 library");
-            System.err.println("java.library.path:"
-                + System.getProperty("java.library.path"));
-            throw ule;
-        }
+        System.loadLibrary("getstacktr08");
     }
 
-    native static void getReady(Thread thr, byte bytes[]);
+    native static void getReady(Class clz, byte bytes[]);
     native static void nativeChain();
 
     public static void main(String args[]) throws Exception {
         ClassLoader cl = getstacktr08.class.getClassLoader();
-        TestThread thr = new TestThread();
+        Thread thread = Thread.ofPlatform().unstarted(new TestThread());
 
         // Read data from class
 
@@ -80,13 +75,21 @@ public class getstacktr08 {
         in.read(bytes);
         in.close();
 
-        getReady(thr, bytes);
+        getReady(TestThread.class, bytes);
 
-        thr.start();
-        thr.join();
+        thread.start();
+        thread.join();
+
+              /*
+        Thread vThread = Thread.ofVirtual().unstarted(new TestThread());
+        vThread.start();
+        vThread.join();
+
+         */
+
     }
 
-    static class TestThread extends Thread {
+    static class TestThread implements Runnable {
         public void run() {
             chain1();
         }
@@ -106,7 +109,6 @@ public class getstacktr08 {
         static void chain4() {
             chain5();
         }
-
         static void chain5() {
             checkPoint();
         }
