@@ -43,9 +43,6 @@ import java.io.PrintStream;
 
 public class getstacktr04 {
 
-    final static int FAILED = 2;
-    final static int JCK_STATUS_BASE = 95;
-
     static {
         try {
             System.loadLibrary("getstacktr04");
@@ -60,26 +57,16 @@ public class getstacktr04 {
     native static void getReady(Class clazz);
     native static int getRes();
 
-    public static void main(String args[]) {
-
-
-        // produce JCK-like exit status.
-        System.exit(run(args, System.out) + JCK_STATUS_BASE);
-    }
-
-    public static int run(String args[], PrintStream out) {
+    public static void main(String args[]) throws Exception {
         TestThread thr = new TestThread();
         getReady(TestThread.class);
 
         thr.start();
-        try {
-            thr.join();
-        } catch (InterruptedException ex) {
-            out.println("# Unexpected " + ex);
-            return FAILED;
-        }
+        thr.join();
 
-        return getRes();
+        if (getRes() != 0) {
+            throw new RuntimeException();
+        }
     }
 
     static class TestThread extends Thread {

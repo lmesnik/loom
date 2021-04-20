@@ -52,8 +52,6 @@ import java.io.*;
 
 public class getstacktr08 {
 
-    final static int FAILED = 2;
-    final static int JCK_STATUS_BASE = 95;
     final static String fileName =
         TestThread.class.getName().replace('.', File.separatorChar) + ".class";
 
@@ -70,47 +68,22 @@ public class getstacktr08 {
 
     native static void getReady(Thread thr, byte bytes[]);
     native static void nativeChain();
-    native static int getRes();
 
-    public static void main(String args[]) {
-
-
-        // produce JCK-like exit status.
-        System.exit(run(args, System.out) + JCK_STATUS_BASE);
-    }
-
-    public static int run(String args[], PrintStream out) {
+    public static void main(String args[]) throws Exception {
         ClassLoader cl = getstacktr08.class.getClassLoader();
         TestThread thr = new TestThread();
 
         // Read data from class
-        byte[] bytes;
-        try {
-            InputStream in = cl.getSystemResourceAsStream(fileName);
-            if (in == null) {
-                out.println("# Class file \"" + fileName + "\" not found");
-                return FAILED;
-            }
-            bytes = new byte[in.available()];
-            in.read(bytes);
-            in.close();
-        } catch (Exception ex) {
-            out.println("# Unexpected exception while reading class file:");
-            out.println("# " + ex);
-            return FAILED;
-        }
+
+        InputStream in = cl.getSystemResourceAsStream(fileName);
+        byte[] bytes = new byte[in.available()];
+        in.read(bytes);
+        in.close();
 
         getReady(thr, bytes);
 
         thr.start();
-        try {
-            thr.join();
-        } catch (InterruptedException ex) {
-            out.println("# Unexpected " + ex);
-            return FAILED;
-        }
-
-        return getRes();
+        thr.join();
     }
 
     static class TestThread extends Thread {

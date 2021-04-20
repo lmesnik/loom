@@ -60,28 +60,13 @@ public class getstacktr06 {
     }
 
     native static void getReady(Class clazz);
-    native static int getRes();
 
-    public static void main(String args[]) {
-
-
-        // produce JCK-like exit status.
-        System.exit(run(args, System.out) + JCK_STATUS_BASE);
-    }
-
-    public static int run(String args[], PrintStream out) {
+    public static void main(String args[]) throws Exception{
         TestThread thr = new TestThread();
         getReady(TestThread.class);
 
         thr.start();
-        try {
-            thr.join();
-        } catch (InterruptedException ex) {
-            out.println("# Unexpected " + ex);
-            return FAILED;
-        }
-
-        return getRes();
+        thr.join();
     }
 
     static class TestThread extends Thread {

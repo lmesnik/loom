@@ -40,12 +40,7 @@
  * @run main/othervm/native -agentlib:getstacktr05 getstacktr05
  */
 
-import java.io.PrintStream;
-
 public class getstacktr05 {
-
-    final static int FAILED = 2;
-    final static int JCK_STATUS_BASE = 95;
 
     static {
         try {
@@ -59,28 +54,13 @@ public class getstacktr05 {
     }
 
     native static void getReady(Class clazz);
-    native static int getRes();
 
-    public static void main(String args[]) {
-
-
-        // produce JCK-like exit status.
-        System.exit(run(args, System.out) + JCK_STATUS_BASE);
-    }
-
-    public static int run(String args[], PrintStream out) {
-        TestThread thr = new TestThread();
+    public static void main(String args[]) throws Exception {
+        TestThread testThread = new TestThread();
         getReady(TestThread.class);
 
-        thr.start();
-        try {
-            thr.join();
-        } catch (InterruptedException ex) {
-            out.println("# Unexpected " + ex);
-            return FAILED;
-        }
-
-        return getRes();
+        testThread.start();
+        testThread.join();
     }
 
     static class TestThread extends Thread {

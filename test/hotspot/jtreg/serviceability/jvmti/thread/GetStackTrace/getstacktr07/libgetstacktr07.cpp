@@ -49,55 +49,34 @@ static frame_info frames[] = {
 
 #define NUMBER_OF_STACK_FRAMES ((int) (sizeof(frames)/sizeof(frame_info)))
 
-void JNICALL Breakpoint(jvmtiEnv *jvmti_env, JNIEnv *env,
-                        jthread thr, jmethodID method, jlocation location) {
-  jvmtiError err;
+void JNICALL Breakpoint(jvmtiEnv *jvmti_env, JNIEnv *jni, jthread thr, jmethodID method, jlocation location) {
   jclass klass;
-  jvmtiClassDefinition classDef;
+  jvmtiClassDefinition class_def;
 
   if (mid != method) {
-    printf("ERROR: don't know where we get called from");
-    result = STATUS_FAILED;
-    return;
-  }
-
-  if (!caps.can_redefine_classes) {
-    printf("Redefine Classes is not implemented\n");
-    return;
+    jni->FatalError("ERROR: don't know where we get called from");
   }
 
   if (classBytes == NULL) {
-    printf("ERROR: don't have any bytes");
-    result = STATUS_FAILED;
-    return;
+    jni->FatalError("ERROR: don't have any bytes");
   }
 
-  err = jvmti->GetMethodDeclaringClass(method, &klass);
-  if (err != JVMTI_ERROR_NONE) {
-    printf("(GetMethodDeclaringClass(bp) unexpected error: %s (%d)\n",
-           TranslateError(err), err);
-    result = STATUS_FAILED;
-    return;
-  }
+  check_jvmti_status(jni, jvmti->GetMethodDeclaringClass(method, &klass), "GetMethodDeclaringClass failed.");
+
 
   printf(">>> redefining class ...\n");
 
-  classDef.klass = klass;
-  classDef.class_byte_count =
-      env->GetArrayLength(classBytes);
-  classDef.class_bytes = (unsigned char *) env->GetByteArrayElements(classBytes, NULL);
+  class_def.klass = klass;
+  class_def.class_byte_count = jni->GetArrayLength(classBytes);
+  class_def.class_bytes = (unsigned char *) jni->GetByteArrayElements(classBytes, NULL);
 
-  err = jvmti->RedefineClasses(1, &classDef);
-  if (err != JVMTI_ERROR_NONE) {
-    printf("(RedefineClasses) unexpected error: %s (%d)\n",
-           TranslateError(err), err);
-    result = STATUS_FAILED;
-    return;
-  }
-  env->DeleteGlobalRef(classBytes);
+  check_jvmti_status(jni, jvmti->RedefineClasses(1, &class_def), "RedefineClasses failed.");
+  jni->DeleteGlobalRef(classBytes);
   classBytes = NULL;
 
-  result = compare_stack_trace(jvmti, env, thr, frames, NUMBER_OF_STACK_FRAMES) == JNI_TRUE? PASSED : STATUS_FAILED;
+  if (!compare_stack_trace(jvmti, jni, thr, frames, NUMBER_OF_STACK_FRAMES)) {
+    jni->ThrowNew(jni->FindClass("java/lang/RuntimeException"), "Stacktrace differs from expected.");
+  }
 }
 
 jint Agent_OnLoad(JavaVM *jvm, char *options, void *reserved) {
@@ -108,12 +87,11 @@ jint Agent_OnLoad(JavaVM *jvm, char *options, void *reserved) {
     return JNI_ERR;
   }
 
-  err = jvmti->GetPotentialCapabilities(&caps);
-  if (err != JVMTI_ERROR_NONE) {
-    printf("(GetPotentialCapabilities) unexpected error: %s (%d)\n",
-           TranslateError(err), err);
-    return JNI_ERR;
-  }
+  jvmtiCapabilities caps;
+  memset(&caps, 0, sizeof(caps));
+  caps.can_generate_breakpoint_events = 1;
+  caps.can_generate_single_step_events = 1;
+  caps.can_redefine_classes = 1;
 
   err = jvmti->AddCapabilities(&caps);
   if (err != JVMTI_ERROR_NONE) {
@@ -122,72 +100,29 @@ jint Agent_OnLoad(JavaVM *jvm, char *options, void *reserved) {
     return JNI_ERR;
   }
 
-  err = jvmti->GetCapabilities(&caps);
+  callbacks.Breakpoint = &Breakpoint;
+  err = jvmti->SetEventCallbacks(&callbacks, sizeof(callbacks));
   if (err != JVMTI_ERROR_NONE) {
-    printf("(GetCapabilities) unexpected error: %s (%d)\n",
+    printf("(SetEventCallbacks) unexpected error: %s (%d)\n",
            TranslateError(err), err);
     return JNI_ERR;
-  }
-
-  if (caps.can_generate_breakpoint_events) {
-    callbacks.Breakpoint = &Breakpoint;
-    err = jvmti->SetEventCallbacks(&callbacks, sizeof(callbacks));
-    if (err != JVMTI_ERROR_NONE) {
-      printf("(SetEventCallbacks) unexpected error: %s (%d)\n",
-             TranslateError(err), err);
-      return JNI_ERR;
-    }
-  } else {
-    printf("Warning: Breakpoint event is not implemented\n");
   }
 
   return JNI_OK;
 }
 
 JNIEXPORT void JNICALL
-Java_getstacktr07_getReady(JNIEnv *env, jclass cls,
-                           jclass clazz, jbyteArray bytes) {
-  jvmtiError err;
+Java_getstacktr07_getReady(JNIEnv *jni, jclass cls, jclass clazz, jbyteArray bytes) {
+  classBytes = (jbyteArray) jni->NewGlobalRef(bytes);
 
-  if (jvmti == NULL) {
-    printf("JVMTI client was not properly loaded!\n");
-    result = STATUS_FAILED;
-    return;
-  }
-
-  if (!caps.can_generate_breakpoint_events) {
-    return;
-  }
-
-  classBytes = (jbyteArray) env->NewGlobalRef(bytes);
-
-  mid = env->GetMethodID(clazz, "checkPoint", "()V");
+  mid = jni->GetMethodID(clazz, "checkPoint", "()V");
   if (mid == NULL) {
-    printf("Cannot find Method ID for method checkPoint\n");
-    result = STATUS_FAILED;
-    return;
+    jni->FatalError("Cannot find Method ID for method checkPoint\n");
   }
 
-  err = jvmti->SetBreakpoint(mid, 0);
-  if (err != JVMTI_ERROR_NONE) {
-    printf("(SetBreakpoint) unexpected error: %s (%d)\n",
-           TranslateError(err), err);
-    result = STATUS_FAILED;
-    return;
-  }
+  check_jvmti_status(jni, jvmti->SetBreakpoint(mid, 0), "SetBreakpoint failed.");
+  set_event_notification_mode(jvmti, jni, JVMTI_ENABLE, JVMTI_EVENT_BREAKPOINT, NULL);
 
-  err = jvmti->SetEventNotificationMode(JVMTI_ENABLE,
-                                        JVMTI_EVENT_BREAKPOINT, NULL);
-  if (err != JVMTI_ERROR_NONE) {
-    printf("Failed to enable BREAKPOINT event: %s (%d)\n",
-           TranslateError(err), err);
-    result = STATUS_FAILED;
-  }
-}
-
-JNIEXPORT jint JNICALL
-Java_getstacktr07_getRes(JNIEnv *env, jclass cls) {
-  return result;
 }
 
 }
